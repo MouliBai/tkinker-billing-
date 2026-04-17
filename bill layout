@@ -1,0 +1,146 @@
+# Thermal Billing Label Generator → PDF (3-inch / 4-inch)
+# Uses reportlab to generate thermal-style invoice PDF
+# Dynamic height based on number of items
+
+from datetime import datetime
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.units import inch
+
+# -----------------------------
+# CONFIGURATION
+# -----------------------------
+
+# Set printer type manually
+printer_type = '3'  # Change to '4' for 4-inch
+
+# Define width in inches
+if printer_type == '3':
+    page_width = 3 * inch
+else:
+    page_width = 4 * inch
+
+# -----------------------------
+# HELPER FUNCTIONS
+# -----------------------------
+
+# Generate dotted line
+def dotted_line():
+    return '-' * 40
+
+# Format left-right text using spacing
+def format_line(left, right):
+    return f"{left}    {right}"
+
+# -----------------------------
+# SAMPLE DATA
+# -----------------------------
+
+data = {
+    'name': 'My Store',
+    'address': '123 Street, City',
+    'phone': '9876543210',
+    'invoice_no': 'INV1001',
+    'items': [
+        {'name': 'Product A', 'mrp': 100, 'discount': 10, 'gst': 5},
+        {'name': 'Product B', 'mrp': 200, 'discount': 20, 'gst': 12}
+    ],
+    'footer': 'Thank you! Visit again.'
+}
+
+# -----------------------------
+# PDF GENERATION FUNCTION
+# -----------------------------
+
+def generate_pdf(data, filename="invoice.pdf"):
+
+    styles = getSampleStyleSheet()
+    story = []  # Content container
+
+    # Estimate dynamic height (important for thermal style)
+    base_height = 2 * inch
+    item_height = len(data['items']) * 0.8 * inch
+    page_height = base_height + item_height
+
+    doc = SimpleDocTemplate(
+        filename,
+        pagesize=(page_width, page_height),
+        rightMargin=5,
+        leftMargin=5,
+        topMargin=5,
+        bottomMargin=5
+    )
+
+    # Store details
+    story.append(Paragraph(data['name'], styles['Normal']))
+    story.append(Paragraph(data['address'], styles['Normal']))
+    story.append(Paragraph(f"Phone: {data['phone']}", styles['Normal']))
+    story.append(Spacer(1, 6))
+
+    story.append(Paragraph(dotted_line(), styles['Normal']))
+
+    # Invoice + date
+    date_time = datetime.now().strftime("%d-%m-%Y %H:%M")
+    story.append(Paragraph(format_line(f"Invoice: {data['invoice_no']}", date_time), styles['Normal']))
+
+    story.append(Paragraph(dotted_line(), styles['Normal']))
+
+    grand_total = 0
+
+    # Items
+    for item in data['items']:
+        name = item['name']
+        mrp = item['mrp']
+        discount = item['discount']
+        gst = item['gst']
+
+        price_after_discount = mrp - discount
+        gst_amount = price_after_discount * gst / 100
+        total = price_after_discount + gst_amount
+
+        grand_total += total
+
+        story.append(Paragraph(name, styles['Normal']))
+        story.append(Paragraph(format_line(f"MRP:{mrp}", f"Disc:{discount}"), styles['Normal']))
+        story.append(Paragraph(format_line(f"GST:{gst}%", f"Amt:{round(total,2)}"), styles['Normal']))
+
+        story.append(Paragraph(dotted_line(), styles['Normal']))
+
+    # Total
+    story.append(Paragraph(format_line("TOTAL", str(round(grand_total, 2))), styles['Normal']))
+
+    story.append(Paragraph(dotted_line(), styles['Normal']))
+
+    # Footer
+    story.append(Paragraph(data['footer'], styles['Normal']))
+
+    # Build PDF
+    doc.build(story)
+
+
+# -----------------------------
+# RUN
+# -----------------------------
+
+generate_pdf(data, "invoice.pdf")
+print("PDF generated successfully!")
+
+
+# -----------------------------
+# TEST CASES
+# -----------------------------
+
+def test_pdf_generation():
+    generate_pdf(data, "test_invoice.pdf")
+
+
+def test_empty_items():
+    test_data = data.copy()
+    test_data['items'] = []
+    generate_pdf(test_data, "test_empty.pdf")
+
+
+if __name__ == "__main__":
+    test_pdf_generation()
+    test_empty_items()
+    print("All PDF tests passed!")
