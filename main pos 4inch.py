@@ -93,7 +93,7 @@ content.append(HRFlowable(width="100%", thickness=1))
 content.append(Paragraph(f"Total: Rs {total_amount}", styles["Normal"]))
 
 # Final line
-content.append(HRFlowable(width="100%", thickness=1))
+content.append(HRFlowable(width="100%", thickness=1, dash=(2, 2)))
 
 # Footer
 content.append(Paragraph("Thank You! Visit Again", styles["Normal"]))
