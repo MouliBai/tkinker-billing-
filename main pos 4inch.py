@@ -2,6 +2,7 @@
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable
 from reportlab.lib.units import mm
 from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.platypus import Image  
 
 # -----------------------------
 # 1. INITIALIZE VALUES
@@ -68,8 +69,11 @@ content = []
 # 3. BUILD CONTENT
 # -----------------------------
 
+#Image("logo.png")
+content.append(Image("logo.png", hAlign='CENTER'))  # Centered logo at the top
+
 # Shop name
-content.append(Paragraph(shop_name, styles["Title"]))
+content.append(Paragraph(f"<b>{shop_name}</b>", styles["Title"]))
 
 # Address
 content.append(Paragraph(shop_address, styles["Normal"]))
