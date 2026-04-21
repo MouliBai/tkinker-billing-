@@ -5,6 +5,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER
 from reportlab.graphics.barcode import code128
 from reportlab.lib import colors
+from datetime import datetime
 
 # =========================================================
 # 1. CONFIGURATION
@@ -18,9 +19,14 @@ LEFT_MARGIN = 5
 RIGHT_MARGIN = 5
 
 shop_name = "Evo Aura"
-shop_address = "Bazaar Street, Shoolagiri - 635117, Tamil Nadu."
+shop_address = "Bazaar Street, Shoolagiri - 635117"
+phone = "Phone : 9876543210"
+gst = "GSTIN : 29ABCDE1234F1Z5"
 
+# invoice details
 bill_no = "INV18/22-23"
+date = datetime.now()
+customer = "Harish, Mysore"
 
 # Items
 items = [
@@ -29,6 +35,27 @@ items = [
     ("Milk", 60),
     ("Bread", 40),
     ("Eggs", 70),
+    ("Apple", 50),
+    ("Banana", 30),
+    ("Milk", 60),
+    ("Bread", 40),
+    ("Eggs", 70),
+    ("Apple", 50),
+    ("Banana", 30),
+    ("Milk", 60),
+    ("Bread", 40),
+    ("Eggs", 70),
+    ("Apple", 50),
+    ("Banana", 30),
+    ("Milk", 60),
+    ("Bread", 40),
+    ("Eggs", 70),
+    ("Apple", 50),
+    ("Banana", 30),
+    ("Milk", 60),
+    ("Bread", 40),
+    ("Eggs", 70)
+    
 ]
 
 total_amount = sum(price for name, price in items)
@@ -51,8 +78,12 @@ logo = Image("logo.png")
 logo._restrictSize((WIDTH_INCH - 0.5) * 72, 35 * mm)
 logo.hAlign = 'CENTER'
 
+# Text elements
+
 shop_name_text = Paragraph(f"<b>{shop_name}</b>", center_style)
 shop_address_text = Paragraph(shop_address, center_style)
+phone_text = Paragraph(phone, center_style)
+gst_text = Paragraph(gst, center_style)
 
 solid_line = HRFlowable(width="100%", thickness=1)
 dotted_line = HRFlowable(width="100%", thickness=1, dash=(2, 2))
@@ -112,6 +143,12 @@ content = []
 content.append(logo)
 content.append(shop_name_text)
 content.append(shop_address_text)
+content.append(phone_text)
+content.append(gst_text)
+
+content.append(solid_line)
+content.append(Paragraph("<b>Tax Invoice / Receipt</b>", center_style))
+content.append(solid_line)
 
 content.append(solid_line)
 content.append(Spacer(1, 4))
