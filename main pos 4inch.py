@@ -2,7 +2,9 @@
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable
 from reportlab.lib.units import mm
 from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.platypus import Image  
+from reportlab.platypus import Image
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_CENTER
 
 # -----------------------------
 # 1. INITIALIZE VALUES
@@ -49,6 +51,16 @@ line_height_mm = 6
 extra_lines = 1  # for header, total, and footer
 height_mm = (len(items) + extra_lines) * line_height_mm
 
+# 1. Create styles FIRST
+styles = getSampleStyleSheet()
+
+# 2. Then create custom style
+center_style = ParagraphStyle(
+    name="Center",
+    parent=styles["Normal"],
+    alignment=TA_CENTER
+)
+
 # -----------------------------
 # 2. CREATE PDF
 # -----------------------------
@@ -70,13 +82,24 @@ content = []
 # -----------------------------
 
 #Image("logo.png")
-content.append(Image("logo.png", hAlign='CENTER'))  # Centered logo at the top
+#content.append(Image("logo.png", width=1526, height=1024, hAlign='CENTER'))  # Centered logo at the top
+
+# Create image object
+img = Image("logo.png")
+
+# Restrict max size (4 inch width, e.g., 40mm height limit)
+img._restrictSize(4 * 72, 40 * mm)  # 4 inch = 288 points
+
+# Center align
+img.hAlign = 'CENTER'
+content.append(img)  # Add image to content
+
 
 # Shop name
-content.append(Paragraph(f"<b>{shop_name}</b>", styles["Title"]))
+#content.append(Paragraph(f"<b>{shop_name}</b>", styles["Title"]))
 
 # Address
-content.append(Paragraph(shop_address, styles["Normal"]))
+content.append(Paragraph(shop_address, center_style))
 
 # FULL WIDTH LINE
 content.append(HRFlowable(width="100%", thickness=1))
