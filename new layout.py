@@ -8,7 +8,7 @@ from reportlab.lib.styles import getSampleStyleSheet
 # 1. INITIAL DATA (DERIVED FIRST)
 # -----------------------------
 
-WIDTH_INCH = 4
+WIDTH_INCH = 3
 width_mm = WIDTH_INCH * 25.4  # convert inch → mm
 
 # Shop details
