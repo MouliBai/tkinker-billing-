@@ -24,8 +24,9 @@ phone = "Phone : 9876543210"
 gst = "GSTIN : 29ABCDE1234F1Z5"
 
 # invoice details
-bill_no = "INV18/22-23"
+bill_no = "Bill No.: INV18/22-23"
 date = datetime.now()
+date_time = "Date: " + date.strftime("%d-%m-%Y %H:%M:%S")
 customer = "Harish, Mysore"
 
 # Items
@@ -149,6 +150,8 @@ content.append(gst_text)
 content.append(solid_line)
 content.append(Paragraph("<b>Tax Invoice / Receipt</b>", center_style))
 content.append(solid_line)
+content.append(Paragraph(bill_no))
+content.append(Paragraph(date_time))
 
 content.append(solid_line)
 content.append(Spacer(1, 4))
