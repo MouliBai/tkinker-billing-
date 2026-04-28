@@ -111,7 +111,7 @@ else:
 col_widths = [usable_width * r for r in ratios]
 
 # Table data
-table_data = [["Item", "Qty", "Amt"]]
+table_data = [["Item","Qty", "Amt"]]
 
 for i, (name, price) in enumerate(items, start=1):
     table_data.append([f"{i}. {name}", "1", f"{price:.2f}"])
