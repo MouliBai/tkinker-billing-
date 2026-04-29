@@ -2,7 +2,7 @@
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable, Image, Table, TableStyle
 from reportlab.lib.units import mm
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_CENTER
+from reportlab.lib.enums import TA_CENTER, TA_RIGHT
 from reportlab.graphics.barcode import code128
 from reportlab.lib import colors
 from datetime import datetime
@@ -11,10 +11,9 @@ from datetime import datetime
 # 1. CONFIGURATION
 # =========================================================
 
-WIDTH_INCH = 4   # 🔁 change to 4 for 4-inch printer
+WIDTH_INCH = 4
 width_mm = WIDTH_INCH * 25.4
 
-# Margins (single source of truth)
 LEFT_MARGIN = 5
 RIGHT_MARGIN = 5
 
@@ -23,133 +22,127 @@ shop_address = "Bazaar Street, Shoolagiri - 635117"
 phone = "Phone : 9876543210"
 gst = "GSTIN : 29ABCDE1234F1Z5"
 
-# invoice details
 bill_no = "Bill No.: INV18/22-23"
 date = datetime.now()
 date_time = "Date: " + date.strftime("%d-%m-%Y %H:%M:%S")
-customer = "Harish, Mysore"
 
-# Items
+# =========================================================
+# 2. ITEMS
+# =========================================================
+
 items = [
-    ("Apple", 50),
-    ("Banana", 30),
-    ("Milk", 60),
-    ("Bread", 40),
-    ("Eggs", 70),
-    ("Apple", 50),
-    ("Banana", 30),
-    ("Milk", 60),
-    ("Bread", 40),
-    ("Eggs", 70),
-    ("Apple", 50),
-    ("Banana", 30),
-    ("Milk", 60),
-    ("Bread", 40),
-    ("Eggs", 70),
-    ("Apple", 50),
-    ("Banana", 30),
-    ("Milk", 60),
-    ("Bread", 40),
-    ("Eggs", 70),
-    ("Apple", 50),
-    ("Banana", 30),
-    ("Milk", 60),
-    ("Bread", 40),
-    ("Eggs", 70)
-    
+    ("AppleAppleAppleAppleAppleAppleAppleApple", 50, 2, False, 0, 0),
+    ("BananaBananaBananaBananaBananaBananaBananaBananaBananaBananaBananaBananaBanana", 30, 1, False, 0, 0),
+    ("Shirt Piece", 200, 1, True, 2.5, 20),
+    ("Milk", 60, 1, False, 0, 0),
+    ("Bread", 40, 2, False, 0, 5),
 ]
 
-total_amount = sum(price for name, price in items)
+# =========================================================
+# 3. STYLES
+# =========================================================
 
-# Styles
 styles = getSampleStyleSheet()
 
-center_style = ParagraphStyle(
-    name="Center",
-    parent=styles["Normal"],
-    alignment=TA_CENTER
+center_style = ParagraphStyle(name="Center", parent=styles["Normal"], alignment=TA_CENTER)
+right_style = ParagraphStyle(name="Right", parent=styles["Normal"], alignment=TA_RIGHT)
+
+# 🔥 NEW: Table text style (for wrapping)
+table_text_style = ParagraphStyle(
+    name="TableText",
+    fontName="Helvetica",
+    fontSize=7,
+    leading=8,
+    wordWrap='CJK'   # ✅ handles long continuous text
 )
 
 # =========================================================
-# 2. STATIC ELEMENTS
+# 4. STATIC ELEMENTS
 # =========================================================
 
-# Logo (auto fit for 3"/4")
 logo = Image("logo.png")
 logo._restrictSize((WIDTH_INCH - 0.5) * 72, 35 * mm)
 logo.hAlign = 'CENTER'
 
-# Text elements
-
-shop_name_text = Paragraph(f"<b>{shop_name}</b>", center_style)
-shop_address_text = Paragraph(shop_address, center_style)
-phone_text = Paragraph(phone, center_style)
-gst_text = Paragraph(gst, center_style)
-
 solid_line = HRFlowable(width="100%", thickness=1)
 dotted_line = HRFlowable(width="100%", thickness=1, dash=(2, 2))
 
-footer_text = Paragraph("Thank You! Visit Again", styles["Normal"])
+footer_text = Paragraph("Thank You! Visit Again", center_style)
 
-# Barcode
 barcode = code128.Code128(bill_no, barHeight=15*mm, barWidth=0.4)
 barcode.hAlign = 'CENTER'
 
 # =========================================================
-# 3. BUILD TABLE (CORRECT DYNAMIC WIDTH)
+# 5. TABLE BUILD
 # =========================================================
 
-# Calculate usable width (REAL FIX)
 usable_width = width_mm * mm - ((LEFT_MARGIN + RIGHT_MARGIN) * mm)
-
-# Column ratios
-if WIDTH_INCH == 3:
-    ratios = [0.5, 0.2, 0.3]
-else:
-    ratios = [0.6, 0.15, 0.25]
-
+# slightly wider item column
+ratios = [0.07, 0.29, 0.14, 0.10, 0.12, 0.12, 0.16]
 col_widths = [usable_width * r for r in ratios]
+table_data = [["S.No", "Item", "Price", "Qty", "Meter", "Disc", "Total"]]
 
-# Table data
-table_data = [["Item","Qty", "Amt"]]
+subtotal = 0
 
-for i, (name, price) in enumerate(items, start=1):
-    table_data.append([f"{i}. {name}", "1", f"{price:.2f}"])
+for i, (name, price, qty, is_shirt, meter, discount) in enumerate(items, start=1):
+    item_total = price * qty - discount
+    subtotal += item_total
 
-# Create table
+    table_data.append([
+        str(i),
+        Paragraph(name, table_text_style),  # wrapped item
+        f"{price:.2f}",                     # ✅ NEW PRICE COLUMN
+        str(qty),
+        f"{meter}" if is_shirt else "-",
+        f"{discount}",
+        f"{item_total:.2f}"
+    ])
+
 table = Table(table_data, colWidths=col_widths)
 
-# Style
 table.setStyle(TableStyle([
     ("FONT", (0,0), (-1,-1), "Helvetica"),
-    ("FONTSIZE", (0,0), (-1,-1), 8),
+    ("FONTSIZE", (0,0), (-1,-1), 7),
 
-    ("ALIGN", (0,0), (0,-1), "LEFT"),     # Item
-    ("ALIGN", (1,0), (1,-1), "CENTER"),   # Qty
-    ("ALIGN", (2,0), (2,-1), "RIGHT"),    # Amount
+    ("FONT", (0,0), (-1,0), "Helvetica-Bold"),
+    ("BACKGROUND", (0,0), (-1,0), colors.lightgrey),
 
-    ("LINEBELOW", (0,0), (-1,0), 1, colors.black),
+    ("ALIGN", (0,0), (0,-1), "CENTER"),   # S.No
+    ("ALIGN", (1,0), (1,-1), "LEFT"),     # Item
+    ("ALIGN", (2,0), (2,-1), "RIGHT"),    # Price ✅
+    ("ALIGN", (3,0), (3,-1), "CENTER"),   # Qty
+    ("ALIGN", (4,0), (4,-1), "CENTER"),   # Meter
+    ("ALIGN", (5,0), (5,-1), "CENTER"),   # Disc
+    ("ALIGN", (6,0), (6,-1), "RIGHT"),    # Total
 
-    ("LEFTPADDING", (0,0), (-1,-1), 2),
-    ("RIGHTPADDING", (0,0), (-1,-1), 2),
-    ("BOTTOMPADDING", (0,0), (-1,0), 6),
+    ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+    ("GRID", (0,0), (-1,-1), 0.3, colors.grey),
 ]))
 
 # =========================================================
-# 4. BUILD CONTENT
+# 6. GST CALCULATION
+# =========================================================
+
+sgst = subtotal * 0.025
+cgst = subtotal * 0.025
+grand_total = subtotal + sgst + cgst
+
+# =========================================================
+# 7. CONTENT BUILD
 # =========================================================
 
 content = []
 
 content.append(logo)
-content.append(shop_name_text)
-content.append(shop_address_text)
-content.append(phone_text)
-content.append(gst_text)
+content.append(Paragraph(f"<b>{shop_name}</b>", center_style))
+content.append(Paragraph(shop_address, center_style))
+content.append(Paragraph(phone, center_style))
+content.append(Paragraph(gst, center_style))
 
 content.append(solid_line)
 content.append(Paragraph("<b>Tax Invoice / Receipt</b>", center_style))
 content.append(solid_line)
+
 content.append(Paragraph(bill_no))
 content.append(Paragraph(date_time))
 
@@ -158,21 +151,32 @@ content.append(Spacer(1, 4))
 
 content.append(table)
 
-content.append(Spacer(1, 4))
+content.append(Spacer(1, 5))
 content.append(solid_line)
-content.append(Paragraph(f"Total: Rs {total_amount:.2f}", styles["Normal"]))
+
+# BILL SUMMARY
+content.append(Paragraph(f"Subtotal : Rs {subtotal:.2f}", right_style))
+content.append(Paragraph(f"SGST (2.5%) : Rs {sgst:.2f}", right_style))
+content.append(Paragraph(f"CGST (2.5%) : Rs {cgst:.2f}", right_style))
+
+content.append(dotted_line)
+
+content.append(Paragraph(
+    f"<b>Grand Total : Rs {grand_total:.2f}</b>",
+    right_style
+))
 
 content.append(dotted_line)
 content.append(Spacer(1, 6))
+
 content.append(footer_text)
 
-# Barcode
 content.append(Spacer(1, 8))
 content.append(barcode)
 content.append(Paragraph(bill_no, center_style))
 
 # =========================================================
-# 5. DYNAMIC HEIGHT
+# 8. DYNAMIC HEIGHT
 # =========================================================
 
 def calculate_height(content, width):
@@ -182,17 +186,13 @@ def calculate_height(content, width):
         total_height += h
     return total_height
 
-# Pre-wrap
 for flowable in content:
     flowable.wrapOn(None, width_mm * mm, 1000)
 
-calculated_height = calculate_height(content, width_mm * mm)
-
-# Safe buffer
-final_height = calculated_height + 30
+final_height = calculate_height(content, width_mm * mm) + 30
 
 # =========================================================
-# 6. CREATE PDF
+# 9. CREATE PDF
 # =========================================================
 
 doc = SimpleDocTemplate(
