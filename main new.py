@@ -3,9 +3,11 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable,
 from reportlab.lib.units import mm
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_RIGHT
-from reportlab.graphics.barcode import code128
+from reportlab.graphics.barcode import code128, qr
+from reportlab.graphics.shapes import Drawing
 from reportlab.lib import colors
 from datetime import datetime
+import math
 
 # =========================================================
 # 1. CONFIGURATION
@@ -31,11 +33,11 @@ date_time = "Date: " + date.strftime("%d-%m-%Y %H:%M:%S")
 # =========================================================
 
 items = [
-    ("AppleAppleAppleAppleAppleAppleAppleApple", 50, 2, False, 0, 0),
-    ("BananaBananaBananaBananaBananaBananaBananaBananaBananaBananaBananaBananaBanana", 30, 1, False, 0, 0),
-    ("Shirt Piece", 200, 1, True, 2.5, 20),
-    ("Milk", 60, 1, False, 0, 0),
-    ("Bread", 40, 2, False, 0, 5),
+    ("AppleAppleAppleAppleAppleAppleAppleApple", 50, 2, False, 0),
+    ("BananaBananaBananaBananaBananaBanana", 30, 1, False, 0),
+    ("Shirt Piece", 200, 1, True, 2.5),
+    ("Pant Piece", 300, 1, True, 3.0),
+    ("Milk", 60, 1, False, 0),
 ]
 
 # =========================================================
@@ -43,17 +45,15 @@ items = [
 # =========================================================
 
 styles = getSampleStyleSheet()
-
 center_style = ParagraphStyle(name="Center", parent=styles["Normal"], alignment=TA_CENTER)
 right_style = ParagraphStyle(name="Right", parent=styles["Normal"], alignment=TA_RIGHT)
 
-# 🔥 NEW: Table text style (for wrapping)
 table_text_style = ParagraphStyle(
     name="TableText",
     fontName="Helvetica",
     fontSize=7,
     leading=8,
-    wordWrap='CJK'   # ✅ handles long continuous text
+    wordWrap='CJK'
 )
 
 # =========================================================
@@ -77,24 +77,28 @@ barcode.hAlign = 'CENTER'
 # =========================================================
 
 usable_width = width_mm * mm - ((LEFT_MARGIN + RIGHT_MARGIN) * mm)
-# slightly wider item column
-ratios = [0.07, 0.29, 0.14, 0.10, 0.12, 0.12, 0.16]
+
+ratios = [0.08, 0.40, 0.14, 0.10, 0.12, 0.16]
 col_widths = [usable_width * r for r in ratios]
-table_data = [["S.No", "Item", "Price", "Qty", "Meter", "Disc", "Total"]]
+
+table_data = [["S.No", "Item", "Price", "Qty", "Meter", "Total"]]
 
 subtotal = 0
 
-for i, (name, price, qty, is_shirt, meter, discount) in enumerate(items, start=1):
-    item_total = price * qty - discount
+for i, (name, price, qty, is_cloth, meter) in enumerate(items, start=1):
+    if is_cloth:
+        item_total = price * meter
+    else:
+        item_total = price * qty
+
     subtotal += item_total
 
     table_data.append([
         str(i),
-        Paragraph(name, table_text_style),  # wrapped item
-        f"{price:.2f}",                     # ✅ NEW PRICE COLUMN
+        Paragraph(name, table_text_style),
+        f"{price:.2f}",
         str(qty),
-        f"{meter}" if is_shirt else "-",
-        f"{discount}",
+        f"{meter}" if is_cloth else "-",
         f"{item_total:.2f}"
     ])
 
@@ -107,28 +111,58 @@ table.setStyle(TableStyle([
     ("FONT", (0,0), (-1,0), "Helvetica-Bold"),
     ("BACKGROUND", (0,0), (-1,0), colors.lightgrey),
 
-    ("ALIGN", (0,0), (0,-1), "CENTER"),   # S.No
-    ("ALIGN", (1,0), (1,-1), "LEFT"),     # Item
-    ("ALIGN", (2,0), (2,-1), "RIGHT"),    # Price ✅
-    ("ALIGN", (3,0), (3,-1), "CENTER"),   # Qty
-    ("ALIGN", (4,0), (4,-1), "CENTER"),   # Meter
-    ("ALIGN", (5,0), (5,-1), "CENTER"),   # Disc
-    ("ALIGN", (6,0), (6,-1), "RIGHT"),    # Total
+    ("ALIGN", (0,0), (0,-1), "CENTER"),
+    ("ALIGN", (1,0), (1,-1), "LEFT"),
+    ("ALIGN", (2,0), (2,-1), "RIGHT"),
+    ("ALIGN", (3,0), (3,-1), "CENTER"),
+    ("ALIGN", (4,0), (4,-1), "CENTER"),
+    ("ALIGN", (5,0), (5,-1), "RIGHT"),
 
     ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
     ("GRID", (0,0), (-1,-1), 0.3, colors.grey),
 ]))
 
 # =========================================================
-# 6. GST CALCULATION
+# 6. DISCOUNT + SAVINGS
 # =========================================================
 
-sgst = subtotal * 0.025
-cgst = subtotal * 0.025
-grand_total = subtotal + sgst + cgst
+extra_discount = 20
+discounted_total = subtotal - extra_discount
+
+# 👉 YOU SAVED
+you_saved = extra_discount
 
 # =========================================================
-# 7. CONTENT BUILD
+# 7. GST + ROUND OFF
+# =========================================================
+
+sgst = discounted_total * 0.025
+cgst = discounted_total * 0.025
+
+gross_total = discounted_total + sgst + cgst
+
+# 👉 ROUND OFF
+rounded_total = round(gross_total)
+round_off = rounded_total - gross_total
+
+# =========================================================
+# 8. UPI QR CODE
+# =========================================================
+
+upi_id = "baimouli-2@okaxis"
+upi_link = f"upi://pay?pa={upi_id}&pn=EvoAura&am={rounded_total}&cu=INR"
+
+qr_code = qr.QrCodeWidget(upi_link)
+bounds = qr_code.getBounds()
+width = bounds[2] - bounds[0]
+height = bounds[3] - bounds[1]
+
+d = Drawing(80, 80, transform=[80/width,0,0,80/height,0,0])
+d.add(qr_code)
+d.hAlign = 'CENTER'
+
+# =========================================================
+# 9. CONTENT BUILD
 # =========================================================
 
 content = []
@@ -154,21 +188,33 @@ content.append(table)
 content.append(Spacer(1, 5))
 content.append(solid_line)
 
-# BILL SUMMARY
+# SUMMARY
 content.append(Paragraph(f"Subtotal : Rs {subtotal:.2f}", right_style))
+
+if extra_discount > 0:
+    content.append(Paragraph(f"Discount : - Rs {extra_discount:.2f}", right_style))
+    content.append(Paragraph(f"You Saved : Rs {you_saved:.2f}", right_style))
+
 content.append(Paragraph(f"SGST (2.5%) : Rs {sgst:.2f}", right_style))
 content.append(Paragraph(f"CGST (2.5%) : Rs {cgst:.2f}", right_style))
+
+content.append(Paragraph(f"Round Off : Rs {round_off:.2f}", right_style))
 
 content.append(dotted_line)
 
 content.append(Paragraph(
-    f"<b>Grand Total : Rs {grand_total:.2f}</b>",
+    f"<b>Grand Total : Rs {rounded_total:.2f}</b>",
     right_style
 ))
 
 content.append(dotted_line)
 content.append(Spacer(1, 6))
 
+# 👉 QR CODE
+content.append(Paragraph("Scan & Pay", center_style))
+content.append(d)
+
+content.append(Spacer(1, 6))
 content.append(footer_text)
 
 content.append(Spacer(1, 8))
@@ -176,7 +222,7 @@ content.append(barcode)
 content.append(Paragraph(bill_no, center_style))
 
 # =========================================================
-# 8. DYNAMIC HEIGHT
+# 10. DYNAMIC HEIGHT
 # =========================================================
 
 def calculate_height(content, width):
@@ -189,10 +235,10 @@ def calculate_height(content, width):
 for flowable in content:
     flowable.wrapOn(None, width_mm * mm, 1000)
 
-final_height = calculate_height(content, width_mm * mm) + 30
+final_height = calculate_height(content, width_mm * mm) + 40
 
 # =========================================================
-# 9. CREATE PDF
+# 11. CREATE PDF
 # =========================================================
 
 doc = SimpleDocTemplate(
