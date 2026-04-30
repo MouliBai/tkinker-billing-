@@ -2,7 +2,7 @@
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable, Image, Table, TableStyle
 from reportlab.lib.units import mm
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_CENTER, TA_RIGHT
+from reportlab.lib.enums import TA_CENTER, TA_RIGHT, TA_LEFT
 from reportlab.graphics.barcode import code128, qr
 from reportlab.graphics.shapes import Drawing
 from reportlab.lib import colors
@@ -47,12 +47,18 @@ items = [
 styles = getSampleStyleSheet()
 center_style = ParagraphStyle(name="Center", parent=styles["Normal"], alignment=TA_CENTER)
 right_style = ParagraphStyle(name="Right", parent=styles["Normal"], alignment=TA_RIGHT)
+left_style = ParagraphStyle(
+    name="Left",
+    parent=styles["Normal"],
+    alignment=TA_LEFT,
+    fontSize=10
+)
 
 table_text_style = ParagraphStyle(
     name="TableText",
     fontName="Helvetica",
-    fontSize=7,
-    leading=8,
+    fontSize=8,
+    leading=12,
     wordWrap='CJK'
 )
 
@@ -106,7 +112,7 @@ table = Table(table_data, colWidths=col_widths)
 
 table.setStyle(TableStyle([
     ("FONT", (0,0), (-1,-1), "Helvetica"),
-    ("FONTSIZE", (0,0), (-1,-1), 7),
+    ("FONTSIZE", (0,0), (-1,-1), 9),
 
     ("FONT", (0,0), (-1,0), "Helvetica-Bold"),
     ("BACKGROUND", (0,0), (-1,0), colors.lightgrey),
@@ -119,14 +125,14 @@ table.setStyle(TableStyle([
     ("ALIGN", (5,0), (5,-1), "RIGHT"),
 
     ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
-    ("GRID", (0,0), (-1,-1), 0.3, colors.grey),
+    ("GRID", (0,0), (-1,-1), 0.3, colors.white), #table color
 ]))
 
 # =========================================================
 # 6. DISCOUNT + SAVINGS
 # =========================================================
 
-extra_discount = 20
+extra_discount = 0
 discounted_total = subtotal - extra_discount
 
 # 👉 YOU SAVED
@@ -193,10 +199,9 @@ content.append(Paragraph(f"Subtotal : Rs {subtotal:.2f}", right_style))
 
 if extra_discount > 0:
     content.append(Paragraph(f"Discount : - Rs {extra_discount:.2f}", right_style))
-    content.append(Paragraph(f"You Saved : Rs {you_saved:.2f}", right_style))
 
-content.append(Paragraph(f"SGST (2.5%) : Rs {sgst:.2f}", right_style))
-content.append(Paragraph(f"CGST (2.5%) : Rs {cgst:.2f}", right_style))
+content.append(Paragraph(f"SGST (2.5%) : Rs {sgst:.2f}", left_style))
+content.append(Paragraph(f"CGST (2.5%) : Rs {cgst:.2f}", left_style))
 
 content.append(Paragraph(f"Round Off : Rs {round_off:.2f}", right_style))
 
@@ -214,12 +219,27 @@ content.append(Spacer(1, 6))
 content.append(Paragraph("Scan & Pay", center_style))
 content.append(d)
 
+
+
+if extra_discount > 0:
+    content.append(dotted_line)
+    content.append(Spacer(1, 6))
+    content.append(Paragraph(f"You Saved : Rs {you_saved:.2f}", right_style))
+
 content.append(Spacer(1, 6))
+content.append(solid_line)
+
+content.append(Spacer(1, 6))
+
 content.append(footer_text)
+content.append(solid_line)
 
 content.append(Spacer(1, 8))
 content.append(barcode)
 content.append(Paragraph(bill_no, center_style))
+content.append(Spacer(1, 8))
+content.append(footer_text)
+
 
 # =========================================================
 # 10. DYNAMIC HEIGHT
