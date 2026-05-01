@@ -13,7 +13,8 @@ import math
 # 1. CONFIGURATION
 # =========================================================
 
-WIDTH_INCH = 4
+WIDTH_INCH = 4 
+
 width_mm = WIDTH_INCH * 25.4
 
 LEFT_MARGIN = 5
@@ -87,7 +88,7 @@ usable_width = width_mm * mm - ((LEFT_MARGIN + RIGHT_MARGIN) * mm)
 ratios = [0.08, 0.40, 0.14, 0.10, 0.12, 0.16]
 col_widths = [usable_width * r for r in ratios]
 
-table_data = [["S.No", "Item", "Price", "Qty", "Meter", "Total"]]
+table_data = [["S.No", "Item", "Price", "Qty", "Mtr", "Total"]]
 
 subtotal = 0
 
@@ -128,6 +129,21 @@ table.setStyle(TableStyle([
     ("GRID", (0,0), (-1,-1), 0.3, colors.white), #table color
 ]))
 
+#------ two value in single line
+
+bill_row = [
+    Paragraph(bill_no, left_style),
+    Paragraph(date_time, right_style)
+]
+
+bill_table = Table([bill_row], colWidths=[usable_width*0.5, usable_width*0.5])
+
+bill_table.setStyle(TableStyle([
+    ("LEFTPADDING", (0,0), (-1,-1), 0),
+    ("RIGHTPADDING", (0,0), (-1,-1), 0),
+    ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+]))
+
 # =========================================================
 # 6. DISCOUNT + SAVINGS
 # =========================================================
@@ -156,16 +172,17 @@ round_off = rounded_total - gross_total
 # =========================================================
 
 upi_id = "baimouli-2@okaxis"
-upi_link = f"upi://pay?pa={upi_id}&pn=EvoAura&am={rounded_total}&cu=INR"
+if upi_id:
+    upi_link = f"upi://pay?pa={upi_id}&pn=EvoAura&am={rounded_total}&cu=INR"
 
-qr_code = qr.QrCodeWidget(upi_link)
-bounds = qr_code.getBounds()
-width = bounds[2] - bounds[0]
-height = bounds[3] - bounds[1]
+    qr_code = qr.QrCodeWidget(upi_link)
+    bounds = qr_code.getBounds()
+    width = bounds[2] - bounds[0]
+    height = bounds[3] - bounds[1]
 
-d = Drawing(80, 80, transform=[80/width,0,0,80/height,0,0])
-d.add(qr_code)
-d.hAlign = 'CENTER'
+    d = Drawing(80, 80, transform=[80/width,0,0,80/height,0,0])
+    d.add(qr_code)
+    d.hAlign = 'CENTER'
 
 # =========================================================
 # 9. CONTENT BUILD
@@ -183,8 +200,7 @@ content.append(solid_line)
 content.append(Paragraph("<b>Tax Invoice / Receipt</b>", center_style))
 content.append(solid_line)
 
-content.append(Paragraph(bill_no))
-content.append(Paragraph(date_time))
+content.append(bill_table)
 
 content.append(solid_line)
 content.append(Spacer(1, 4))
@@ -216,8 +232,9 @@ content.append(dotted_line)
 content.append(Spacer(1, 6))
 
 # 👉 QR CODE
-content.append(Paragraph("Scan & Pay", center_style))
-content.append(d)
+if upi_id:
+    content.append(Paragraph("Scan & Pay", center_style))
+    content.append(d)
 
 
 
