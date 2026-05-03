@@ -1,19 +1,21 @@
 import sys
-import sqlite3  # Used to connect SQLite database
+import sqlite3
+import pyotp
 
-# Import PyQt5 widgets
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QPushButton,
     QLabel, QLineEdit, QGridLayout, QMessageBox
 )
 
+# 🔐 SECRET KEY (ADD SAME IN GOOGLE AUTHENTICATOR)
+SECRET_CODE = "JBSWY3DPEHPK3PXP"
+
+
 # ---------------- DATABASE SETUP ----------------
 def init_db():
-    """Create database and table if not exists"""
-    conn = sqlite3.connect("users.db")  # Create/connect DB file
+    conn = sqlite3.connect("users.db")
     cursor = conn.cursor()
 
-    # Create table
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -31,14 +33,12 @@ class LoginForm(QWidget):
     def __init__(self):
         super().__init__()
 
-        # Window settings
         self.setWindowTitle('Login Form')
-        self.setFixedSize(400, 220)  # Slight height increase
+        self.setFixedSize(400, 220)
 
-        # Create layout
         layout = QGridLayout()
 
-        # -------- USERNAME --------
+        # USERNAME
         label_name = QLabel('Username')
         self.lineEdit_username = QLineEdit()
         self.lineEdit_username.setPlaceholderText('Enter username')
@@ -46,35 +46,31 @@ class LoginForm(QWidget):
         layout.addWidget(label_name, 0, 0)
         layout.addWidget(self.lineEdit_username, 0, 1)
 
-        # -------- PASSWORD --------
+        # PASSWORD
         label_password = QLabel('Password')
         self.lineEdit_password = QLineEdit()
         self.lineEdit_password.setPlaceholderText('Enter password')
-        self.lineEdit_password.setEchoMode(QLineEdit.Password)  # Hide password
+        self.lineEdit_password.setEchoMode(QLineEdit.Password)
 
         layout.addWidget(label_password, 1, 0)
         layout.addWidget(self.lineEdit_password, 1, 1)
 
-        # -------- LOGIN BUTTON --------
+        # BUTTONS
         button_login = QPushButton('Login')
         button_login.clicked.connect(self.check_login)
 
-        # -------- SIGNUP BUTTON --------
         button_signup = QPushButton('Signup')
         button_signup.clicked.connect(self.open_signup)
 
-        # Add buttons
         layout.addWidget(button_login, 2, 0)
         layout.addWidget(button_signup, 2, 1)
 
         self.setLayout(layout)
 
-    # -------- LOGIN FUNCTION --------
     def check_login(self):
         username = self.lineEdit_username.text().strip()
         password = self.lineEdit_password.text().strip()
 
-        # Validation
         if not username or not password:
             QMessageBox.warning(self, "Error", "Please enter all fields")
             return
@@ -91,11 +87,10 @@ class LoginForm(QWidget):
         conn.close()
 
         if result:
-            QMessageBox.information(self, "Success", "Login Successful")
+            QMessageBox.information(self, "Success", "Login Successful ✅")
         else:
-            QMessageBox.warning(self, "Error", "Invalid Username or Password")
+            QMessageBox.warning(self, "Error", "Invalid Username or Password ❌")
 
-    # -------- OPEN SIGNUP WINDOW --------
     def open_signup(self):
         self.signup_window = SignupForm()
         self.signup_window.show()
@@ -106,14 +101,12 @@ class SignupForm(QWidget):
     def __init__(self):
         super().__init__()
 
-        # Window settings
         self.setWindowTitle('Signup Form')
-        self.setFixedSize(400, 260)  # Increased height for new field
+        self.setFixedSize(400, 260)
 
-        # Layout
         layout = QGridLayout()
 
-        # -------- USERNAME --------
+        # USERNAME
         label_name = QLabel('New Username')
         self.username = QLineEdit()
         self.username.setPlaceholderText('Create username')
@@ -121,7 +114,7 @@ class SignupForm(QWidget):
         layout.addWidget(label_name, 0, 0)
         layout.addWidget(self.username, 0, 1)
 
-        # -------- PASSWORD --------
+        # PASSWORD
         label_password = QLabel('New Password')
         self.password = QLineEdit()
         self.password.setPlaceholderText('Create password')
@@ -130,16 +123,16 @@ class SignupForm(QWidget):
         layout.addWidget(label_password, 1, 0)
         layout.addWidget(self.password, 1, 1)
 
-        # -------- SUPER PASSWORD (NEW) --------
-        label_super = QLabel('Admin Key')
+        # 🔐 OTP FIELD (REPLACED ADMIN KEY)
+        label_super = QLabel('Enter 6-digit Code')
         self.super_password = QLineEdit()
-        self.super_password.setPlaceholderText('Enter admin key')
+        self.super_password.setPlaceholderText('Enter OTP from Authenticator')
         self.super_password.setEchoMode(QLineEdit.Password)
 
         layout.addWidget(label_super, 2, 0)
         layout.addWidget(self.super_password, 2, 1)
 
-        # -------- CREATE BUTTON --------
+        # BUTTON
         button_create = QPushButton('Create Account')
         button_create.clicked.connect(self.create_account)
 
@@ -147,23 +140,20 @@ class SignupForm(QWidget):
 
         self.setLayout(layout)
 
-        # 🔐 SUPER PASSWORD (CHANGE THIS VALUE)
-        self.ADMIN_KEY = "admin123"
-
-    # -------- CREATE ACCOUNT FUNCTION --------
     def create_account(self):
         username = self.username.text().strip()
         password = self.password.text().strip()
-        super_pass = self.super_password.text().strip()
+        otp_code = self.super_password.text().strip()
 
-        # Check empty fields
-        if not username or not password or not super_pass:
+        if not username or not password or not otp_code:
             QMessageBox.warning(self, "Error", "Please fill all fields")
             return
 
-        # 🔐 CHECK ADMIN KEY FIRST
-        if super_pass != self.ADMIN_KEY:
-            QMessageBox.warning(self, "Access Denied", "Invalid Admin Key")
+        # 🔐 VERIFY OTP
+        totp = pyotp.TOTP(SECRET_CODE)
+
+        if not totp.verify(otp_code):
+            QMessageBox.warning(self, "Access Denied", "Invalid or Expired Code ❌")
             return
 
         conn = sqlite3.connect("users.db")
@@ -176,7 +166,7 @@ class SignupForm(QWidget):
             )
             conn.commit()
 
-            QMessageBox.information(self, "Success", "Account Created")
+            QMessageBox.information(self, "Success", "Account Created ✅")
             self.close()
 
         except sqlite3.IntegrityError:
@@ -187,7 +177,7 @@ class SignupForm(QWidget):
 
 # ---------------- MAIN APP ----------------
 if __name__ == '__main__':
-    init_db()  # Create DB first
+    init_db()
 
     app = QApplication(sys.argv)
 
