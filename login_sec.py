@@ -8,12 +8,12 @@ import string
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QPushButton,
     QLabel, QLineEdit, QGridLayout,
-    QMessageBox, QInputDialog, QVBoxLayout
+    QMessageBox, QInputDialog, QVBoxLayout, QHBoxLayout
 )
 from PyQt5.QtGui import QPixmap
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, pyqtSignal
 
-# 🔐 MASTER SECRET (DIFFERENT)
+# 🔐 MASTER SECRET
 MASTER_SECRET = "KRSXG5DSNFXGOIDB"
 
 
@@ -28,6 +28,7 @@ def init_db():
         username TEXT UNIQUE,
         password TEXT,
         otp_secret TEXT,
+        qr_path TEXT,
         recovery_codes TEXT
     )
     """)
@@ -64,85 +65,131 @@ def generate_qr(secret, username):
     return path
 
 
+# ---------------- CLICKABLE LABEL ----------------
+class ClickableLabel(QLabel):
+    clicked = pyqtSignal()
+
+    def mousePressEvent(self, event):
+        self.clicked.emit()
+
+
 # ---------------- QR DISPLAY ----------------
 class QRDisplay(QWidget):
-    def __init__(self, secret, qr_path, recovery_codes):
+    def __init__(self, username, secret, qr_path, recovery_codes):
         super().__init__()
 
+        self.username = username
+        self.secret = secret
+
         self.setWindowTitle("Setup 2FA")
-        self.setFixedSize(420, 500)  # increased window size
+        self.setFixedSize(420, 520)
 
-        layout = QGridLayout()
+        layout = QVBoxLayout()
 
-        # 🔹 Title
-        title = QLabel("Scan QR in Authenticator")
+        title = QLabel("📱 Scan QR in Authenticator")
         title.setAlignment(Qt.AlignCenter)
-        layout.addWidget(title, 0, 0, 1, 2)
+        layout.addWidget(title)
 
-        # 🔹 QR IMAGE (RESIZED)
+        # QR
         qr_label = QLabel()
-        pixmap = QPixmap(qr_path)
-
-        # Resize QR to fit nicely
-        pixmap = pixmap.scaled(200, 200, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-
+        pixmap = QPixmap(qr_path).scaled(240, 240, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         qr_label.setPixmap(pixmap)
         qr_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(qr_label)
 
-        layout.addWidget(qr_label, 1, 0, 1, 2)
+        # SECRET + COPY
+        secret_layout = QHBoxLayout()
 
-        # 🔹 Secret
-        label_secret = QLabel(f"Secret:\n{secret}")
-        label_secret.setWordWrap(True)
-        layout.addWidget(label_secret, 2, 0, 1, 2)
+        self.secret_field = QLineEdit(secret)
+        self.secret_field.setReadOnly(True)
 
-        # 🔹 Recovery Codes
-        label_recovery = QLabel(
-            "Recovery Codes:\n" + "\n".join(recovery_codes)
-        )
-        label_recovery.setWordWrap(True)
-        layout.addWidget(label_recovery, 3, 0, 1, 2)
+        btn_copy = QPushButton("Copy")
+        btn_copy.clicked.connect(self.copy_secret)
 
-        # 🔹 Close Button
+        secret_layout.addWidget(self.secret_field)
+        secret_layout.addWidget(btn_copy)
+
+        layout.addLayout(secret_layout)
+
+        # 🔹 Forgot link
+        forgot = ClickableLabel("<a href='#'>Forgot Code?</a>")
+        forgot.setAlignment(Qt.AlignRight)
+        forgot.setTextFormat(Qt.RichText)
+        forgot.clicked.connect(self.open_recovery)
+        layout.addWidget(forgot)
+
+        # Recovery codes
+        rec_text = "\n".join(recovery_codes)
+        rec_label = QLabel("Recovery Codes:\n" + rec_text)
+        rec_label.setWordWrap(True)
+        layout.addWidget(rec_label)
+
         btn_close = QPushButton("Done")
         btn_close.clicked.connect(self.close)
-        layout.addWidget(btn_close, 4, 0, 1, 2)
+        layout.addWidget(btn_close)
 
         self.setLayout(layout)
 
+    def copy_secret(self):
+        QApplication.clipboard().setText(self.secret)
+        QMessageBox.information(self, "Copied", "Secret copied ✅")
 
-# ---------------- STARTUP AUTH ----------------
-class StartupAuth(QWidget):
-    def __init__(self):
+    def open_recovery(self):
+        username, ok = QInputDialog.getText(self, "Recover", "Enter Username:")
+        if ok and username:
+            self.recovery = RecoveryAuth(username)
+            self.recovery.show()
+
+
+# ---------------- RECOVERY ----------------
+class RecoveryAuth(QWidget):
+    def __init__(self, username):
         super().__init__()
 
-        self.setWindowTitle("Security Check")
+        self.username = username
+
+        self.setWindowTitle("Recover 2FA")
         self.setFixedSize(350, 150)
 
         layout = QGridLayout()
 
-        self.otp_input = QLineEdit()
-        self.otp_input.setPlaceholderText("Enter Setup Code")
-        self.otp_input.setEchoMode(QLineEdit.Password)
+        self.master_input = QLineEdit()
+        self.master_input.setEchoMode(QLineEdit.Password)
 
         btn = QPushButton("Verify")
         btn.clicked.connect(self.verify)
 
-        layout.addWidget(QLabel("Enter Setup Code"), 0, 0)
-        layout.addWidget(self.otp_input, 0, 1)
+        layout.addWidget(QLabel("Master Code"), 0, 0)
+        layout.addWidget(self.master_input, 0, 1)
         layout.addWidget(btn, 1, 0, 1, 2)
 
         self.setLayout(layout)
 
     def verify(self):
-        totp = pyotp.TOTP(MASTER_SECRET)
-
-        if totp.verify(self.otp_input.text().strip()):
-            self.signup = SignupForm()
-            self.signup.show()
+        if pyotp.TOTP(MASTER_SECRET).verify(self.master_input.text().strip()):
+            self.show_qr()
             self.close()
         else:
             QMessageBox.warning(self, "Error", "Invalid Code ❌")
+
+    def show_qr(self):
+        conn = sqlite3.connect("users.db")
+        cursor = conn.cursor()
+
+        cursor.execute(
+            "SELECT otp_secret, qr_path, recovery_codes FROM users WHERE username=?",
+            (self.username,)
+        )
+
+        data = cursor.fetchone()
+        conn.close()
+
+        if data:
+            secret, qr_path, recovery = data
+            self.qr = QRDisplay(self.username, secret, qr_path, recovery.split(","))
+            self.qr.show()
+        else:
+            QMessageBox.warning(self, "Error", "User not found")
 
 
 # ---------------- LOGIN ----------------
@@ -210,9 +257,7 @@ class LoginForm(QWidget):
                 QMessageBox.information(self, "Success", "Login Success ✅")
                 return
 
-            # check recovery
-            codes = recovery.split(",")
-            if otp in codes:
+            if otp in recovery.split(","):
                 QMessageBox.information(self, "Success", "Login via Recovery Code ✅")
                 return
 
@@ -277,12 +322,12 @@ class SignupForm(QWidget):
 
         try:
             cursor.execute(
-                "INSERT INTO users VALUES (NULL, ?, ?, ?, ?)",
-                (u, p, user_secret, ",".join(recovery_codes))
+                "INSERT INTO users VALUES (NULL, ?, ?, ?, ?, ?)",
+                (u, p, user_secret, qr_path, ",".join(recovery_codes))
             )
             conn.commit()
 
-            self.qr = QRDisplay(user_secret, qr_path, recovery_codes)
+            self.qr = QRDisplay(u, user_secret, qr_path, recovery_codes)
             self.qr.show()
 
             self.close()
