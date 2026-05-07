@@ -8,10 +8,13 @@ from PyQt5.QtWidgets import (
     QLineEdit,
     QGridLayout,
     QMessageBox,
-    QInputDialog
+    QInputDialog,
+    QVBoxLayout,
+    QHBoxLayout,
+    QFrame
 )
 
-from PyQt5.QtGui import QPixmap
+from PyQt5.QtGui import QPixmap, QFont
 from PyQt5.QtCore import Qt
 
 from backend import *
@@ -109,6 +112,193 @@ class StartupAuth(QWidget):
             QMessageBox.warning(self, "Error", "Invalid Code ❌")
 
 
+# ---------------- DASHBOARD ----------------
+class Dashboard(QWidget):
+
+    def __init__(self, username="Admin User"):
+        super().__init__()
+
+        self.setWindowTitle("Evo Aura Billing Dashboard")
+        self.showMaximized()
+
+        # ================= MAIN LAYOUT =================
+        main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(20, 15, 20, 15)
+        main_layout.setSpacing(15)
+
+        # ================= MODERN TOP BAR =================
+        top_frame = QFrame()
+        top_frame.setObjectName("topFrame")
+        top_frame.setFixedHeight(80)
+
+        top_layout = QHBoxLayout(top_frame)
+        top_layout.setContentsMargins(20, 5, 20, 5)
+        top_layout.setSpacing(15)
+
+        # -------- LEFT (Logo + Name) --------
+        left_widget = QWidget()
+        left_layout = QHBoxLayout(left_widget)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(8)
+
+        logo = QLabel("⚡")
+        logo.setStyleSheet("font-size: 22px;")
+
+        app_name = QLabel("Evo Aura")
+        app_name.setFont(QFont("Segoe UI", 14, QFont.Bold))
+
+        left_layout.addWidget(logo)
+        left_layout.addWidget(app_name)
+
+        # -------- CENTER (Title) --------
+        title = QLabel("Billing Dashboard")
+        title.setFont(QFont("Segoe UI", 16, QFont.Bold))
+        title.setAlignment(Qt.AlignCenter)
+
+        # -------- RIGHT (User + Logout) --------
+        right_widget = QWidget()
+        right_layout = QHBoxLayout(right_widget)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(10)
+
+        user_label = QLabel(username)
+        user_label.setFont(QFont("Segoe UI", 11))
+
+        avatar = QLabel("👤")
+        avatar.setStyleSheet("""
+            font-size: 20px;
+            background-color: #eef5ff;
+            border-radius: 12px;
+            padding: 5px;
+        """)
+
+        logout_btn = QPushButton("Logout")
+        logout_btn.setCursor(Qt.PointingHandCursor)
+        logout_btn.setFixedHeight(30)
+
+        logout_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #ff5c5c;
+                color: white;
+                border-radius: 6px;
+                padding: 4px 10px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #ff3b3b;
+            }
+        """)
+
+        logout_btn.clicked.connect(self.close)
+
+        right_layout.addWidget(user_label)
+        right_layout.addWidget(avatar)
+        right_layout.addWidget(logout_btn)
+
+        # -------- ADD TO TOP BAR --------
+        top_layout.addWidget(left_widget)
+        top_layout.addStretch()
+
+        top_layout.addWidget(title)
+
+        top_layout.addStretch()
+        top_layout.addWidget(right_widget)
+
+        main_layout.addWidget(top_frame)
+
+        # ================= MAIN CARD =================
+        card = QFrame()
+        card.setObjectName("mainCard")
+
+        card_layout = QVBoxLayout()
+        card_layout.setContentsMargins(50, 30, 50, 30)
+        card_layout.setSpacing(20)
+
+        # Welcome
+        welcome = QLabel(f"Welcome, {username}")
+        welcome.setAlignment(Qt.AlignCenter)
+        welcome.setFont(QFont("Segoe UI", 26, QFont.Bold))
+
+        card_layout.addWidget(welcome)
+
+        # ================= BUTTON GRID =================
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(20)
+        grid.setVerticalSpacing(20)
+
+        def create_btn(text, action):
+            btn = QPushButton(text)
+            btn.setMinimumHeight(120)
+            btn.clicked.connect(lambda: self.coming_soon(action))
+            return btn
+
+        grid.addWidget(create_btn("⊞   Add Product", "Add Product"), 0, 0)
+        grid.addWidget(create_btn("🛒   Sale", "Sale"), 0, 1)
+
+        grid.addWidget(create_btn("👥   Users", "Users"), 1, 0)
+        grid.addWidget(create_btn("📊   Report\nInsights", "Report"), 1, 1)
+
+        grid.addWidget(create_btn("🧾   Bill View", "Bill View"), 2, 0, 1, 2)
+
+        card_layout.addLayout(grid)
+        card.setLayout(card_layout)
+
+        main_layout.addWidget(card)
+
+        self.setLayout(main_layout)
+
+        # ================= STYLE =================
+        self.setStyleSheet("""
+            QWidget {
+                background-color: #f4f7fb;
+                font-family: Segoe UI;
+            }
+
+            #topFrame {
+                background: white;
+                border-radius: 10px;
+                border: 1px solid #e6edf5;
+            }
+
+            #mainCard {
+                background: white;
+                border-radius: 14px;
+                border: 1px solid #e6edf5;
+            }
+
+            QPushButton {
+                background-color: #ffffff;
+                border: 1px solid #d6e4f0;
+                border-radius: 12px;
+                font-size: 18px;
+                font-weight: 600;
+                padding: 15px;
+            }
+
+            QPushButton:hover {
+                background-color: #f0f7ff;
+                border: 1px solid #4da3ff;
+            }
+
+            QLabel {
+                color: #222;
+            }
+        """)
+
+    def coming_soon(self, page):
+        QMessageBox.information(
+            self,
+            page,
+            f"{page} Module Coming Soon 🚀"
+        )
+    # ================= COMING SOON =================
+    def coming_soon(self, page):
+
+        QMessageBox.information(
+            self,
+            page,
+            f"{page} Wizard Coming Soon 🚀"
+        )
 # ---------------- LOGIN ----------------
 class LoginForm(QWidget):
 
@@ -173,7 +363,13 @@ class LoginForm(QWidget):
                     "Login Success ✅"
                 )
 
+                self.dashboard = Dashboard(u)
+                self.dashboard.show()
+
+                self.close()
+
                 return
+
 
             if otp in result["recovery_codes"]:
 
