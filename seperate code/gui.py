@@ -1,28 +1,38 @@
+"""
+========================================================
+🔐 EVO AURA BILLING SYSTEM (WITH 2FA)
+--------------------------------------------------------
+Flow:
+1. App starts
+2. Check if users exist
+3. If NO → StartupAuth (Master Code)
+4. If YES → Login
+5. After login → OTP Verification
+6. Success → Dashboard
+7. Signup → QR + Recovery Codes
+========================================================
+"""
+
 import sys
+import os
 
+# ---------------- PYQT IMPORTS ----------------
 from PyQt5.QtWidgets import (
-    QApplication,
-    QWidget,
-    QPushButton,
-    QLabel,
-    QLineEdit,
-    QGridLayout,
-    QMessageBox,
-    QInputDialog,
-    QVBoxLayout,
-    QHBoxLayout,
-    QFrame
+    QApplication, QWidget, QPushButton, QLabel,
+    QLineEdit, QGridLayout, QMessageBox,
+    QInputDialog, QVBoxLayout, QHBoxLayout, QFrame
 )
-
 from PyQt5.QtGui import QPixmap, QFont
 from PyQt5.QtCore import Qt
 
+# ---------------- BACKEND IMPORT ----------------
 from backend import *
 
 
-# ---------------- QR DISPLAY ----------------
+# ========================================================
+# 🔹 QR DISPLAY WINDOW (Shown after signup)
+# ========================================================
 class QRDisplay(QWidget):
-
     def __init__(self, secret, qr_path, recovery_codes):
         super().__init__()
 
@@ -31,51 +41,43 @@ class QRDisplay(QWidget):
 
         layout = QGridLayout()
 
+        # Title
         title = QLabel("Scan QR in Authenticator")
         title.setAlignment(Qt.AlignCenter)
-
         layout.addWidget(title, 0, 0, 1, 2)
 
+        # QR Image
         qr_label = QLabel()
-
         pixmap = QPixmap(qr_path)
 
-        pixmap = pixmap.scaled(
-            200,
-            200,
-            Qt.KeepAspectRatio,
-            Qt.SmoothTransformation
+        qr_label.setPixmap(
+            pixmap.scaled(200, 200, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         )
-
-        qr_label.setPixmap(pixmap)
         qr_label.setAlignment(Qt.AlignCenter)
 
         layout.addWidget(qr_label, 1, 0, 1, 2)
 
-        label_secret = QLabel(f"Secret:\n{secret}")
-        label_secret.setWordWrap(True)
+        # Secret Key
+        layout.addWidget(QLabel(f"Secret:\n{secret}"), 2, 0, 1, 2)
 
-        layout.addWidget(label_secret, 2, 0, 1, 2)
-
-        label_recovery = QLabel(
-            "Recovery Codes:\n" + "\n".join(recovery_codes)
+        # Recovery Codes
+        layout.addWidget(
+            QLabel("Recovery Codes:\n" + "\n".join(recovery_codes)),
+            3, 0, 1, 2
         )
 
-        label_recovery.setWordWrap(True)
-
-        layout.addWidget(label_recovery, 3, 0, 1, 2)
-
+        # Done Button
         btn_close = QPushButton("Done")
         btn_close.clicked.connect(self.close)
-
         layout.addWidget(btn_close, 4, 0, 1, 2)
 
         self.setLayout(layout)
 
 
-# ---------------- STARTUP AUTH ----------------
+# ========================================================
+# 🔹 FIRST TIME AUTH (Master Code Screen)
+# ========================================================
 class StartupAuth(QWidget):
-
     def __init__(self):
         super().__init__()
 
@@ -84,260 +86,126 @@ class StartupAuth(QWidget):
 
         layout = QGridLayout()
 
+        # Input field
         self.otp_input = QLineEdit()
-
         self.otp_input.setPlaceholderText("Enter Setup Code")
         self.otp_input.setEchoMode(QLineEdit.Password)
 
+        # Verify Button
         btn = QPushButton("Verify")
         btn.clicked.connect(self.verify)
 
         layout.addWidget(QLabel("Enter Setup Code"), 0, 0)
         layout.addWidget(self.otp_input, 0, 1)
-
         layout.addWidget(btn, 1, 0, 1, 2)
 
         self.setLayout(layout)
 
     def verify(self):
+        """Check master setup code"""
 
         if verify_master_code(self.otp_input.text().strip()):
-
             self.signup = SignupForm()
             self.signup.show()
-
             self.close()
-
         else:
             QMessageBox.warning(self, "Error", "Invalid Code ❌")
 
 
-# ---------------- DASHBOARD ----------------
+# ========================================================
+# 🔹 DASHBOARD (Main App Screen)
+# ========================================================
 class Dashboard(QWidget):
-
-    def __init__(self, username="Admin User"):
+    def __init__(self, username="Admin"):
         super().__init__()
 
         self.setWindowTitle("Evo Aura Billing")
         self.showMaximized()
 
-        # ================= MAIN LAYOUT =================
         main_layout = QVBoxLayout()
-        main_layout.setContentsMargins(20, 15, 20, 15)
-        main_layout.setSpacing(15)
-
         self.setStyleSheet("background-color: #f4f7fb;")
 
-        # ================= TOP BAR =================
-        top_frame = QFrame()
-        top_frame.setFixedHeight(80)
-        top_frame.setStyleSheet("""
-            background: white;
-            border-radius: 10px;
-        """)
-
-        top_layout = QHBoxLayout(top_frame)
-        top_layout.setContentsMargins(20, 5, 20, 5)
-
-        # -------- LEFT --------
-        left_widget = QWidget()
-        left_layout = QHBoxLayout(left_widget)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-
-        logo = QLabel()
-        logo.setFixedSize(40, 40)
-
-        pixmap = QPixmap("C:/Users/nawaz/Downloads/tkinker-billing-/seperate code/witness.png")
-
-        logo.setPixmap(
-            pixmap.scaled(
-                logo.size(),
-                Qt.KeepAspectRatio,
-                Qt.SmoothTransformation
-            )
-        )
-        app_name = QLabel("Evo Aura")
-        app_name.setFont(QFont("Segoe UI", 14, QFont.Bold))
-
-        left_layout.addWidget(logo)
-        left_layout.addWidget(app_name)
-
-        # -------- CENTER (FIXED NO BG) --------
-        title = QLabel("Dashboard")
-        title.setFont(QFont("Segoe UI", 16, QFont.Bold))
-        title.setAlignment(Qt.AlignCenter)
-
-        # 🔥 IMPORTANT FIX (no background box)
-        title.setStyleSheet("background: transparent;")
-
-        # Wrap for perfect centering
-        title_container = QWidget()
-        title_layout = QHBoxLayout(title_container)
-        title_layout.setContentsMargins(0, 0, 0, 0)
-        title_layout.addStretch()
-        title_layout.addWidget(title)
-        title_layout.addStretch()
-
-        # -------- RIGHT --------
-        right_widget = QWidget()
-        right_layout = QHBoxLayout(right_widget)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-
-        avatar = QLabel("👤")
-        avatar.setStyleSheet("""
-            font-size: 20px;
-            background-color: #eef5ff;
-            border-radius: 12px;
-            padding: 5px;
-        """)
-
-        user_label = QLabel(username)
-        user_label.setFont(QFont("Segoe UI", 11))
-
-        logout_btn = QPushButton("Logout")
-        logout_btn.setCursor(Qt.PointingHandCursor)
-        logout_btn.setFixedHeight(30)
-
-        logout_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #ff5c5c;
-                color: white;
-                border-radius: 6px;
-                padding: 4px 10px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #ff3b3b;
-            }
-        """)
-
-        logout_btn.clicked.connect(self.close)
-
-        right_layout.addWidget(avatar)
-        right_layout.addWidget(user_label)
-        right_layout.addWidget(logout_btn)
-
-        # -------- ADD --------
-        top_layout.addWidget(left_widget)
-        top_layout.addWidget(title_container, 1)
-        top_layout.addWidget(right_widget)
-
+        # ---------------- TOP BAR ----------------
+        top_frame = self.create_top_bar(username)
         main_layout.addWidget(top_frame)
 
-        # ================= MAIN CARD =================
-        card = QFrame()
-        card.setStyleSheet("""
-            background: white;
-            border-radius: 14px;
-            border: 1px solid #e6edf5;
-        """)
-
-        card_layout = QVBoxLayout()
-        card_layout.setContentsMargins(50, 30, 50, 30)
-        card_layout.setSpacing(20)
-
-        import os
-
-        base_path = os.path.dirname(__file__)
-        img_path = os.path.join(base_path, "C:/Users/nawaz/Downloads/tkinker-billing-/hloo_qr.png")
-
-        # ================= WELCOME =================
-        if os.path.exists(img_path):
-
-            container = QWidget()
-            layout = QHBoxLayout(container)
-            layout.setContentsMargins(0, 0, 0, 0)
-            layout.setSpacing(10)
-
-            # ---- IMAGE ----
-            img_label = QLabel()
-            img_label.setFixedSize(100, 100)
-
-            pixmap = QPixmap(img_path)
-            if not pixmap.isNull():
-                img_label.setPixmap(
-                    pixmap.scaled(
-                        img_label.size(),
-                        Qt.KeepAspectRatio,
-                        Qt.SmoothTransformation
-                    )
-                )
-
-            # ---- TEXT ----
-            welcome = QLabel(f"Welcome, {username}")
-            welcome.setFont(QFont("Segoe UI", 26, QFont.Bold))
-            welcome.setStyleSheet("background: transparent;")
-
-            # ---- LAYOUT (LEFT ↔ RIGHT) ----
-            layout.addStretch()
-            layout.addWidget(img_label)
-            layout.addWidget(welcome)
-            layout.addStretch()
-
-            card_layout.addWidget(container)
-
-        else:
-            # 👉 ORIGINAL (UNCHANGED)
-            welcome = QLabel(f"Welcome, {username}")
-            welcome.setAlignment(Qt.AlignCenter)
-            welcome.setFont(QFont("Segoe UI", 26, QFont.Bold))
-            welcome.setStyleSheet("""
-                QLabel {
-                    background-color: #eef5ff;
-                }
-            """)
-
-            card_layout.addWidget(welcome)
-
-
-        # ================= BUTTON GRID =================
-        grid = QGridLayout()
-        grid.setSpacing(20)
-
-        def create_btn(text, action):
-            btn = QPushButton(text)
-            btn.setMinimumHeight(120)
-
-            btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #ffffff;
-                    border: 1px solid #d6e4f0;
-                    border-radius: 12px;
-                    font-size: 18px;
-                    font-weight: 600;
-                    padding: 15px;
-                }
-                QPushButton:hover {
-                    background-color: #f0f7ff;
-                    border: 1px solid #4da3ff;
-                }
-            """)
-
-            btn.clicked.connect(lambda: self.coming_soon(action))
-            return btn
-
-        grid.addWidget(create_btn("⊞   Add Product", "Add Product"), 0, 0)
-        grid.addWidget(create_btn("🛒   Sale", "Sale"), 0, 1)
-        grid.addWidget(create_btn("👥   Users", "Users"), 1, 0)
-        grid.addWidget(create_btn("📊   Report\nInsights", "Report"), 1, 1)
-        grid.addWidget(create_btn("🧾   Bill View", "Bill View"), 2, 0, 1, 2)
-
-        card_layout.addLayout(grid)
-        card.setLayout(card_layout)
-
+        # ---------------- MAIN CARD ----------------
+        card = self.create_main_card(username)
         main_layout.addWidget(card)
 
         self.setLayout(main_layout)
 
-    def coming_soon(self, page):
-        QMessageBox.information(
-            self,
-            page,
-            f"{page} Coming Soon 🚀"
-        )
-# ---------------- LOGIN ----------------
-class LoginForm(QWidget):
+    # ---------- TOP BAR ----------
+    def create_top_bar(self, username):
+        frame = QFrame()
+        frame.setFixedHeight(80)
+        frame.setStyleSheet("background: white; border-radius: 10px;")
 
+        layout = QHBoxLayout(frame)
+
+        # Left (Logo + Name)
+        left = QLabel("Evo Aura")
+        left.setFont(QFont("Segoe UI", 14, QFont.Bold))
+
+        # Center (Title)
+        title = QLabel("Dashboard")
+        title.setFont(QFont("Segoe UI", 16, QFont.Bold))
+        title.setAlignment(Qt.AlignCenter)
+
+        # Right (User + Logout)
+        logout = QPushButton("Logout")
+        logout.clicked.connect(self.close)
+
+        layout.addWidget(left)
+        layout.addStretch()
+        layout.addWidget(title)
+        layout.addStretch()
+        layout.addWidget(QLabel(username))
+        layout.addWidget(logout)
+
+        return frame
+
+    # ---------- MAIN CARD ----------
+    def create_main_card(self, username):
+        card = QFrame()
+        card.setStyleSheet("background: white; border-radius: 14px;")
+
+        layout = QVBoxLayout()
+
+        # Welcome
+        welcome = QLabel(f"Welcome, {username}")
+        welcome.setFont(QFont("Segoe UI", 26, QFont.Bold))
+        welcome.setAlignment(Qt.AlignCenter)
+
+        layout.addWidget(welcome)
+
+        # Buttons Grid
+        grid = QGridLayout()
+
+        def create_btn(text):
+            btn = QPushButton(text)
+            btn.setMinimumHeight(100)
+            btn.clicked.connect(lambda: self.coming_soon(text))
+            return btn
+
+        grid.addWidget(create_btn("Add Product"), 0, 0)
+        grid.addWidget(create_btn("Sale"), 0, 1)
+        grid.addWidget(create_btn("Users"), 1, 0)
+        grid.addWidget(create_btn("Reports"), 1, 1)
+
+        layout.addLayout(grid)
+        card.setLayout(layout)
+
+        return card
+
+    def coming_soon(self, page):
+        QMessageBox.information(self, page, f"{page} Coming Soon 🚀")
+
+
+# ========================================================
+# 🔹 LOGIN SCREEN
+# ========================================================
+class LoginForm(QWidget):
     def __init__(self):
         super().__init__()
 
@@ -347,7 +215,6 @@ class LoginForm(QWidget):
         layout = QGridLayout()
 
         self.username = QLineEdit()
-
         self.password = QLineEdit()
         self.password.setEchoMode(QLineEdit.Password)
 
@@ -369,6 +236,7 @@ class LoginForm(QWidget):
         self.setLayout(layout)
 
     def login(self):
+        """Handle login + OTP verification"""
 
         u = self.username.text().strip()
         p = self.password.text().strip()
@@ -376,62 +244,30 @@ class LoginForm(QWidget):
         result = login_user(u, p)
 
         if not result["success"]:
-            QMessageBox.warning(
-                self,
-                "Error",
-                result["message"]
-            )
+            QMessageBox.warning(self, "Error", result["message"])
             return
 
-        otp, ok = QInputDialog.getText(
-            self,
-            "2FA",
-            "Enter OTP or Recovery Code:"
-        )
+        # OTP Prompt
+        otp, ok = QInputDialog.getText(self, "2FA", "Enter OTP:")
 
-        if ok:
+        if ok and verify_otp(result["secret"], otp):
+            QMessageBox.information(self, "Success", "Login Success ✅")
 
-            if verify_otp(result["secret"], otp):
-
-                QMessageBox.information(
-                    self,
-                    "Success",
-                    "Login Success ✅"
-                )
-
-                self.dashboard = Dashboard(u)
-                self.dashboard.show()
-
-                self.close()
-
-                return
-
-
-            if otp in result["recovery_codes"]:
-
-                QMessageBox.information(
-                    self,
-                    "Success",
-                    "Login via Recovery Code ✅"
-                )
-
-                return
-
-            QMessageBox.warning(
-                self,
-                "Error",
-                "Invalid Code ❌"
-            )
+            self.dashboard = Dashboard(u)
+            self.dashboard.show()
+            self.close()
+        else:
+            QMessageBox.warning(self, "Error", "Invalid Code ❌")
 
     def open_signup(self):
-
         self.signup = SignupForm()
         self.signup.show()
 
 
-# ---------------- SIGNUP ----------------
+# ========================================================
+# 🔹 SIGNUP SCREEN
+# ========================================================
 class SignupForm(QWidget):
-
     def __init__(self):
         super().__init__()
 
@@ -441,10 +277,8 @@ class SignupForm(QWidget):
         layout = QGridLayout()
 
         self.username = QLineEdit()
-
         self.password = QLineEdit()
         self.password.setEchoMode(QLineEdit.Password)
-
         self.master = QLineEdit()
         self.master.setEchoMode(QLineEdit.Password)
 
@@ -465,61 +299,44 @@ class SignupForm(QWidget):
         self.setLayout(layout)
 
     def create(self):
+        """Create user + generate QR"""
 
         u = self.username.text().strip()
         p = self.password.text().strip()
         m = self.master.text().strip()
 
         if not u or not p or not m:
-
-            QMessageBox.warning(
-                self,
-                "Error",
-                "Fill all fields"
-            )
-
+            QMessageBox.warning(self, "Error", "Fill all fields")
             return
 
         if not verify_master_code(m):
-
-            QMessageBox.warning(
-                self,
-                "Error",
-                "Invalid Setup Code"
-            )
-
+            QMessageBox.warning(self, "Error", "Invalid Setup Code")
             return
 
         result = create_user(u, p)
 
         if result["success"]:
-
             self.qr = QRDisplay(
                 result["secret"],
                 result["qr_path"],
                 result["recovery_codes"]
             )
-
             self.qr.show()
-
             self.close()
-
         else:
-
-            QMessageBox.warning(
-                self,
-                "Error",
-                result["message"]
-            )
+            QMessageBox.warning(self, "Error", result["message"])
 
 
-# ---------------- MAIN ----------------
+# ========================================================
+# 🚀 MAIN ENTRY POINT
+# ========================================================
 if __name__ == "__main__":
 
-    init_db()
+    init_db()  # Create DB if not exists
 
     app = QApplication(sys.argv)
 
+    # Check if users exist
     if has_users():
         window = LoginForm()
     else:
