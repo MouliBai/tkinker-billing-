@@ -126,43 +126,64 @@ class Dashboard(QWidget):
         main_layout.setContentsMargins(20, 15, 20, 15)
         main_layout.setSpacing(15)
 
-        # ================= MODERN TOP BAR =================
+        self.setStyleSheet("background-color: #f4f7fb;")
+
+        # ================= TOP BAR =================
         top_frame = QFrame()
-        top_frame.setObjectName("topFrame")
         top_frame.setFixedHeight(80)
+        top_frame.setStyleSheet("""
+            background: white;
+            border-radius: 10px;
+        """)
 
         top_layout = QHBoxLayout(top_frame)
         top_layout.setContentsMargins(20, 5, 20, 5)
-        top_layout.setSpacing(15)
 
-        # -------- LEFT (Logo + Name) --------
+        # -------- LEFT --------
         left_widget = QWidget()
         left_layout = QHBoxLayout(left_widget)
         left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(8)
 
-        logo = QLabel("⚡")
-        logo.setStyleSheet("font-size: 22px;")
+        logo = QLabel()
+        logo.setFixedSize(32, 32)
 
+        pixmap = QPixmap("witness.png")
+
+        logo.setPixmap(
+            pixmap.scaled(
+                logo.size(),
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation
+            )
+        )
         app_name = QLabel("Evo Aura")
         app_name.setFont(QFont("Segoe UI", 14, QFont.Bold))
 
         left_layout.addWidget(logo)
         left_layout.addWidget(app_name)
 
-        # -------- CENTER (Title) --------
+        # -------- CENTER (FIXED NO BG) --------
         title = QLabel("Billing Dashboard")
         title.setFont(QFont("Segoe UI", 16, QFont.Bold))
         title.setAlignment(Qt.AlignCenter)
 
-        # -------- RIGHT (User + Logout) --------
+        # 🔥 IMPORTANT FIX (no background box)
+        title.setStyleSheet("background: transparent;")
+
+        # Wrap for perfect centering
+        title_container = QWidget()
+        title_layout = QHBoxLayout(title_container)
+        title_layout.setContentsMargins(0, 0, 0, 0)
+        title_layout.addStretch()
+        title_layout.addWidget(title)
+        title_layout.addStretch()
+
+        # -------- RIGHT --------
         right_widget = QWidget()
         right_layout = QHBoxLayout(right_widget)
         right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.setSpacing(10)
 
-        user_label = QLabel(username)
-        user_label.setFont(QFont("Segoe UI", 11))
+
 
         avatar = QLabel("👤")
         avatar.setStyleSheet("""
@@ -171,6 +192,9 @@ class Dashboard(QWidget):
             border-radius: 12px;
             padding: 5px;
         """)
+
+        user_label = QLabel(username)
+        user_label.setFont(QFont("Segoe UI", 11))
 
         logout_btn = QPushButton("Logout")
         logout_btn.setCursor(Qt.PointingHandCursor)
@@ -195,49 +219,65 @@ class Dashboard(QWidget):
         right_layout.addWidget(avatar)
         right_layout.addWidget(logout_btn)
 
-        # -------- ADD TO TOP BAR --------
+        # -------- ADD --------
         top_layout.addWidget(left_widget)
-        top_layout.addStretch()
-
-        top_layout.addWidget(title)
-
-        top_layout.addStretch()
+        top_layout.addWidget(title_container, 1)
         top_layout.addWidget(right_widget)
 
         main_layout.addWidget(top_frame)
 
         # ================= MAIN CARD =================
         card = QFrame()
-        card.setObjectName("mainCard")
+        card.setStyleSheet("""
+            background: white;
+            border-radius: 14px;
+            border: 1px solid #e6edf5;
+        """)
 
         card_layout = QVBoxLayout()
         card_layout.setContentsMargins(50, 30, 50, 30)
         card_layout.setSpacing(20)
 
-        # Welcome
         welcome = QLabel(f"Welcome, {username}")
         welcome.setAlignment(Qt.AlignCenter)
         welcome.setFont(QFont("Segoe UI", 26, QFont.Bold))
+        welcome.setStyleSheet("""
+            QLabel {
+                background-color: #eef5ff;
+                    }""")
 
         card_layout.addWidget(welcome)
 
         # ================= BUTTON GRID =================
         grid = QGridLayout()
-        grid.setHorizontalSpacing(20)
-        grid.setVerticalSpacing(20)
+        grid.setSpacing(20)
 
         def create_btn(text, action):
             btn = QPushButton(text)
             btn.setMinimumHeight(120)
+
+            btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #ffffff;
+                    border: 1px solid #d6e4f0;
+                    border-radius: 12px;
+                    font-size: 18px;
+                    font-weight: 600;
+                    padding: 15px;
+                }
+                QPushButton:hover {
+                    background-color: #f0f7ff;
+                    border: 1px solid #4da3ff;
+                }
+            """)
+
             btn.clicked.connect(lambda: self.coming_soon(action))
             return btn
 
         grid.addWidget(create_btn("⊞   Add Product", "Add Product"), 0, 0)
         grid.addWidget(create_btn("🛒   Sale", "Sale"), 0, 1)
-
         grid.addWidget(create_btn("👥   Users", "Users"), 1, 0)
         grid.addWidget(create_btn("📊   Report\nInsights", "Report"), 1, 1)
-
         grid.addWidget(create_btn("🧾   Bill View", "Bill View"), 2, 0, 1, 2)
 
         card_layout.addLayout(grid)
@@ -247,57 +287,11 @@ class Dashboard(QWidget):
 
         self.setLayout(main_layout)
 
-        # ================= STYLE =================
-        self.setStyleSheet("""
-            QWidget {
-                background-color: #f4f7fb;
-                font-family: Segoe UI;
-            }
-
-            #topFrame {
-                background: white;
-                border-radius: 10px;
-                border: 1px solid #e6edf5;
-            }
-
-            #mainCard {
-                background: white;
-                border-radius: 14px;
-                border: 1px solid #e6edf5;
-            }
-
-            QPushButton {
-                background-color: #ffffff;
-                border: 1px solid #d6e4f0;
-                border-radius: 12px;
-                font-size: 18px;
-                font-weight: 600;
-                padding: 15px;
-            }
-
-            QPushButton:hover {
-                background-color: #f0f7ff;
-                border: 1px solid #4da3ff;
-            }
-
-            QLabel {
-                color: #222;
-            }
-        """)
-
     def coming_soon(self, page):
         QMessageBox.information(
             self,
             page,
-            f"{page} Module Coming Soon 🚀"
-        )
-    # ================= COMING SOON =================
-    def coming_soon(self, page):
-
-        QMessageBox.information(
-            self,
-            page,
-            f"{page} Wizard Coming Soon 🚀"
+            f"{page} Coming Soon 🚀"
         )
 # ---------------- LOGIN ----------------
 class LoginForm(QWidget):
