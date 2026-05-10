@@ -147,7 +147,7 @@ class Dashboard(QWidget):
         logo = QLabel()
         logo.setFixedSize(32, 32)
 
-        pixmap = QPixmap("witness.png")
+        pixmap = QPixmap("C:/Users/nawaz/Downloads/tkinker-billing-/seperate code/witness.png")
 
         logo.setPixmap(
             pixmap.scaled(
@@ -215,8 +215,8 @@ class Dashboard(QWidget):
 
         logout_btn.clicked.connect(self.close)
 
-        right_layout.addWidget(user_label)
         right_layout.addWidget(avatar)
+        right_layout.addWidget(user_label)
         right_layout.addWidget(logout_btn)
 
         # -------- ADD --------
