@@ -118,7 +118,7 @@ class Dashboard(QWidget):
     def __init__(self, username="Admin User"):
         super().__init__()
 
-        self.setWindowTitle("Evo Aura Billing Dashboard")
+        self.setWindowTitle("Evo Aura Billing")
         self.showMaximized()
 
         # ================= MAIN LAYOUT =================
@@ -145,7 +145,7 @@ class Dashboard(QWidget):
         left_layout.setContentsMargins(0, 0, 0, 0)
 
         logo = QLabel()
-        logo.setFixedSize(32, 32)
+        logo.setFixedSize(40, 40)
 
         pixmap = QPixmap("C:/Users/nawaz/Downloads/tkinker-billing-/seperate code/witness.png")
 
@@ -163,7 +163,7 @@ class Dashboard(QWidget):
         left_layout.addWidget(app_name)
 
         # -------- CENTER (FIXED NO BG) --------
-        title = QLabel("Billing Dashboard")
+        title = QLabel("Dashboard")
         title.setFont(QFont("Segoe UI", 16, QFont.Bold))
         title.setAlignment(Qt.AlignCenter)
 
@@ -182,8 +182,6 @@ class Dashboard(QWidget):
         right_widget = QWidget()
         right_layout = QHBoxLayout(right_widget)
         right_layout.setContentsMargins(0, 0, 0, 0)
-
-
 
         avatar = QLabel("👤")
         avatar.setStyleSheet("""
@@ -238,15 +236,59 @@ class Dashboard(QWidget):
         card_layout.setContentsMargins(50, 30, 50, 30)
         card_layout.setSpacing(20)
 
-        welcome = QLabel(f"Welcome, {username}")
-        welcome.setAlignment(Qt.AlignCenter)
-        welcome.setFont(QFont("Segoe UI", 26, QFont.Bold))
-        welcome.setStyleSheet("""
-            QLabel {
-                background-color: #eef5ff;
-                    }""")
+        import os
 
-        card_layout.addWidget(welcome)
+        base_path = os.path.dirname(__file__)
+        img_path = os.path.join(base_path, "C:/Users/nawaz/Downloads/tkinker-billing-/hloo_qr.png")
+
+        # ================= WELCOME =================
+        if os.path.exists(img_path):
+
+            container = QWidget()
+            layout = QHBoxLayout(container)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setSpacing(10)
+
+            # ---- IMAGE ----
+            img_label = QLabel()
+            img_label.setFixedSize(100, 100)
+
+            pixmap = QPixmap(img_path)
+            if not pixmap.isNull():
+                img_label.setPixmap(
+                    pixmap.scaled(
+                        img_label.size(),
+                        Qt.KeepAspectRatio,
+                        Qt.SmoothTransformation
+                    )
+                )
+
+            # ---- TEXT ----
+            welcome = QLabel(f"Welcome, {username}")
+            welcome.setFont(QFont("Segoe UI", 26, QFont.Bold))
+            welcome.setStyleSheet("background: transparent;")
+
+            # ---- LAYOUT (LEFT ↔ RIGHT) ----
+            layout.addStretch()
+            layout.addWidget(img_label)
+            layout.addWidget(welcome)
+            layout.addStretch()
+
+            card_layout.addWidget(container)
+
+        else:
+            # 👉 ORIGINAL (UNCHANGED)
+            welcome = QLabel(f"Welcome, {username}")
+            welcome.setAlignment(Qt.AlignCenter)
+            welcome.setFont(QFont("Segoe UI", 26, QFont.Bold))
+            welcome.setStyleSheet("""
+                QLabel {
+                    background-color: #eef5ff;
+                }
+            """)
+
+            card_layout.addWidget(welcome)
+
 
         # ================= BUTTON GRID =================
         grid = QGridLayout()
