@@ -11,13 +11,164 @@ from PyQt5.QtWidgets import (
     QInputDialog,
     QVBoxLayout,
     QHBoxLayout,
-    QFrame
+    QFrame,
+    QComboBox
 )
 
 from PyQt5.QtGui import QPixmap, QFont
 from PyQt5.QtCore import Qt
 
-from backend import *
+import sqlite3
+import pyotp
+import qrcode
+import random
+import string
+
+MASTER_SECRET = "KRSXG5DSNFXGOIDB"
+
+
+# ---------------- DATABASE ----------------
+def init_db(db_name="users.db"):
+    conn = sqlite3.connect(db_name)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE,
+        password TEXT,
+        role TEXT,
+        otp_secret TEXT,
+        recovery_codes TEXT
+    )
+    """)
+
+    conn.commit()
+    conn.close()
+
+
+def has_users():
+    conn = sqlite3.connect("users.db")
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT COUNT(*) FROM users")
+    count = cursor.fetchone()[0]
+
+    conn.close()
+    return count > 0
+
+
+# ---------------- HELPERS ----------------
+def generate_recovery_codes():
+    return [
+        ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+        for _ in range(5)
+    ]
+
+
+def generate_qr(secret, username):
+    uri = pyotp.TOTP(secret).provisioning_uri(
+        name=username,
+        issuer_name="EvoAura"
+    )
+
+    img = qrcode.make(uri)
+    path = f"{username}_qr.png"
+    img.save(path)
+
+    return path
+
+
+# ---------------- MASTER CODE ----------------
+def verify_master_code(code):
+    totp = pyotp.TOTP(MASTER_SECRET)
+    return totp.verify(code)
+
+
+# ---------------- USER CREATE ----------------
+def create_user(username, password, role="user"):
+    user_secret = pyotp.random_base32()
+    recovery_codes = generate_recovery_codes()
+    qr_path = generate_qr(user_secret, username)
+
+    conn = sqlite3.connect("users.db")
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute(
+            "INSERT INTO users VALUES (NULL, ?, ?, ?, ?, ?)",
+            (username, password, role, user_secret, ",".join(recovery_codes))
+        )
+        conn.commit()
+
+        return {
+            "success": True,
+            "secret": user_secret,
+            "recovery_codes": recovery_codes,
+            "qr_path": qr_path
+        }
+
+    except:
+        return {"success": False, "message": "Username exists"}
+
+    finally:
+        conn.close()
+
+
+# ---------------- LOGIN ----------------
+def login_user(username, password):
+    conn = sqlite3.connect("users.db")
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "SELECT password, otp_secret, role FROM users WHERE username=?",
+        (username,)
+    )
+
+    data = cursor.fetchone()
+    conn.close()
+
+    if not data:
+        return {"success": False, "message": "User not found"}
+
+    db_pass, secret, role = data
+
+    if password != db_pass:
+        return {"success": False, "message": "Wrong password"}
+
+    return {
+        "success": True,
+        "secret": secret,
+        "role": role
+    }
+
+
+# ---------------- VERIFY OTP ----------------
+def verify_otp(secret, otp):
+    return pyotp.TOTP(secret).verify(otp)
+
+
+# ---------------- GET ADMIN SECRET ----------------
+def get_admin_secret():
+    conn = sqlite3.connect("users.db")
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT otp_secret FROM users WHERE role='admin'")
+    data = cursor.fetchone()
+
+    conn.close()
+
+    return data[0] if data else None
+
+
+# ---------------- GET ALL USERNAMES ----------------
+def get_all_usernames():
+    conn = sqlite3.connect("users.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT username FROM users ORDER BY username")
+    rows = cursor.fetchall()
+    conn.close()
+    return [row[0] for row in rows]
 
 
 # ---------------- QR DISPLAY ----------------
@@ -342,14 +493,65 @@ class LoginForm(QWidget):
         super().__init__()
 
         self.setWindowTitle("Login")
-        self.setFixedSize(400, 220)
+        self.setFixedSize(430, 270)
 
         layout = QGridLayout()
+        layout.setSpacing(10)
+        layout.setContentsMargins(20, 20, 20, 20)
 
-        self.username = QLineEdit()
+        # --- Username Dropdown ---
+        self.username = QComboBox()
+        self.username.setEditable(True)
+        self.username.setInsertPolicy(QComboBox.NoInsert)
+        self.username.setPlaceholderText("Select username  🡻")
+        self.username.setMinimumHeight(34)
+        self.username.setStyleSheet("""
+            QComboBox {
+                border: 2px solid #4da3ff;
+                border-radius: 6px;
+                padding: 4px 10px;
+                font-size: 13px;
+                background: white;
+                color: #222;
+            }
+            QComboBox:hover {
+                border: 2px solid #1a7fe8;
+            }
+            QComboBox::drop-down {
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: 32px;
+                border-left: 1px solid #4da3ff;
+                border-top-right-radius: 6px;
+                border-bottom-right-radius: 6px;
+                background-color: #eef5ff;
+            }
+            QComboBox::down-arrow {
+                width: 12px;
+                height: 12px;
+            }
+            QComboBox QAbstractItemView {
+                border: 1px solid #4da3ff;
+                border-radius: 4px;
+                background: white;
+                selection-background-color: #ddeeff;
+                selection-color: #111;
+                font-size: 13px;
+                padding: 2px;
+            }
+        """)
+        self.load_usernames()
 
         self.password = QLineEdit()
         self.password.setEchoMode(QLineEdit.Password)
+        self.password.setStyleSheet("""
+            QLineEdit {
+                border: 1px solid #c0d6ea;
+                border-radius: 6px;
+                padding: 4px 8px;
+                font-size: 13px;
+            }
+        """)
 
         layout.addWidget(QLabel("Username"), 0, 0)
         layout.addWidget(self.username, 0, 1)
@@ -368,9 +570,16 @@ class LoginForm(QWidget):
 
         self.setLayout(layout)
 
+    def load_usernames(self):
+        self.username.clear()
+        usernames = get_all_usernames()
+        for name in usernames:
+            self.username.addItem(name)
+        self.username.setCurrentIndex(-1)  # blank by default
+
     def login(self):
 
-        u = self.username.text().strip()
+        u = self.username.currentText().strip()
         p = self.password.text().strip()
 
         result = login_user(u, p)
@@ -427,6 +636,8 @@ class LoginForm(QWidget):
 
         self.signup = SignupForm()
         self.signup.show()
+        # Reload usernames when signup window closes
+        self.signup.destroyed.connect(self.load_usernames)
 
 
 # ---------------- SIGNUP ----------------
@@ -436,7 +647,7 @@ class SignupForm(QWidget):
         super().__init__()
 
         self.setWindowTitle("Signup")
-        self.setFixedSize(400, 260)
+        self.setFixedSize(430, 290)
 
         layout = QGridLayout()
 
