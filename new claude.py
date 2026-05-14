@@ -3,18 +3,9 @@ import os
 import glob
 
 from PyQt5.QtWidgets import (
-    QApplication,
-    QWidget,
-    QPushButton,
-    QLabel,
-    QLineEdit,
-    QGridLayout,
-    QMessageBox,
-    QInputDialog,
-    QVBoxLayout,
-    QHBoxLayout,
-    QFrame,
-    QComboBox
+    QApplication, QWidget, QPushButton, QLabel,
+    QLineEdit, QGridLayout, QMessageBox, QInputDialog,
+    QVBoxLayout, QHBoxLayout, QFrame, QComboBox, QCheckBox
 )
 
 from PyQt5.QtGui import QPixmap, QFont
@@ -333,7 +324,7 @@ class SignupForm(QWidget):
         self.db_name = db_name
 
         self.setWindowTitle("Create User")
-        self.setFixedSize(420, 310)
+        self.setFixedSize(420, 390)
 
         layout = QVBoxLayout()
         layout.setContentsMargins(40, 25, 40, 25)
@@ -346,8 +337,8 @@ class SignupForm(QWidget):
 
         grid = QGridLayout()
         grid.setSpacing(10)
-        grid.setColumnMinimumWidth(0, 90)
-        grid.setColumnMinimumWidth(1, 220)
+        grid.setColumnMinimumWidth(0, 110)
+        grid.setColumnMinimumWidth(1, 210)
 
         self.username = QLineEdit()
         self.username.setPlaceholderText("Enter username")
@@ -358,17 +349,28 @@ class SignupForm(QWidget):
         self.password.setEchoMode(QLineEdit.Password)
         self.password.setMinimumHeight(34)
 
+        self.confirm_password = QLineEdit()
+        self.confirm_password.setPlaceholderText("Confirm password")
+        self.confirm_password.setEchoMode(QLineEdit.Password)
+        self.confirm_password.setMinimumHeight(34)
+
+        self.show_pass = QCheckBox("Show Password")
+        self.show_pass.stateChanged.connect(self.toggle_password)
+
         self.master = QLineEdit()
         self.master.setPlaceholderText("6-digit TOTP code")
         self.master.setEchoMode(QLineEdit.Password)
         self.master.setMinimumHeight(34)
 
-        grid.addWidget(QLabel("Username"),   0, 0)
-        grid.addWidget(self.username,         0, 1)
-        grid.addWidget(QLabel("Password"),   1, 0)
-        grid.addWidget(self.password,         1, 1)
-        grid.addWidget(QLabel("Setup Code"), 2, 0)
-        grid.addWidget(self.master,           2, 1)
+        grid.addWidget(QLabel("Username"),         0, 0)
+        grid.addWidget(self.username,               0, 1)
+        grid.addWidget(QLabel("Password"),         1, 0)
+        grid.addWidget(self.password,               1, 1)
+        grid.addWidget(QLabel("Confirm Password"), 2, 0)
+        grid.addWidget(self.confirm_password,       2, 1)
+        grid.addWidget(self.show_pass,              3, 1)
+        grid.addWidget(QLabel("Setup Code"),       4, 0)
+        grid.addWidget(self.master,                 4, 1)
 
         layout.addLayout(grid)
 
@@ -379,13 +381,23 @@ class SignupForm(QWidget):
 
         self.setLayout(layout)
 
+    def toggle_password(self, state):
+        mode = QLineEdit.Normal if state else QLineEdit.Password
+        self.password.setEchoMode(mode)
+        self.confirm_password.setEchoMode(mode)
+
     def create(self):
         u = self.username.text().strip()
         p = self.password.text().strip()
+        c = self.confirm_password.text().strip()
         m = self.master.text().strip()
 
-        if not u or not p or not m:
+        if not u or not p or not c or not m:
             QMessageBox.warning(self, "Error", "Please fill all fields.")
+            return
+
+        if p != c:
+            QMessageBox.warning(self, "Error", "Passwords do not match ❌")
             return
 
         if not verify_master_code(m):
@@ -402,7 +414,6 @@ class SignupForm(QWidget):
             self.close()
         else:
             QMessageBox.warning(self, "Error", result["message"])
-
 
 # ──────────────────────────────────────────
 #  LOGIN
