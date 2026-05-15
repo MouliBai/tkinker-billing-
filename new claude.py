@@ -1,6 +1,12 @@
 import sys
 import os
 import glob
+import sqlite3
+import random
+import string
+
+import pyotp
+import qrcode
 
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QPushButton, QLabel,
@@ -12,11 +18,6 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtGui import QPixmap, QFont, QIcon
 from PyQt5.QtCore import Qt
 
-import sqlite3
-import pyotp
-import qrcode
-import random
-import string
 
 MASTER_SECRET = "KRSXG5DSNFXGOIDB"
 
@@ -786,13 +787,7 @@ class CompanySettings(QWidget):
 # ──────────────────────────────────────────
 #  DASHBOARD
 # ──────────────────────────────────────────
-from PyQt5.QtWidgets import (
-    QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout,
-    QFrame, QGridLayout, QMessageBox, QInputDialog, QLineEdit
-)
-from PyQt5.QtGui import QFont, QPixmap
-from PyQt5.QtCore import Qt
-import sqlite3
+
 
 
 class Dashboard(QWidget):
