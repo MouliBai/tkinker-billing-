@@ -5,10 +5,11 @@ import glob
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QPushButton, QLabel,
     QLineEdit, QGridLayout, QMessageBox, QInputDialog,
-    QVBoxLayout, QHBoxLayout, QFrame, QComboBox, QCheckBox
+    QVBoxLayout, QHBoxLayout, QFrame, QComboBox,
+    QCheckBox, QTextEdit, QFileDialog
 )
 
-from PyQt5.QtGui import QPixmap, QFont
+from PyQt5.QtGui import QPixmap, QFont, QIcon
 from PyQt5.QtCore import Qt
 
 import sqlite3
@@ -38,6 +39,7 @@ def init_db(db_name):
     """)
     conn.commit()
     conn.close()
+    init_company_table(db_name)
 
 
 def has_users(db_name):
@@ -47,6 +49,67 @@ def has_users(db_name):
     count = cursor.fetchone()[0]
     conn.close()
     return count > 0
+
+
+# ──────────────────────────────────────────
+#  COMPANY INFO TABLE
+# ──────────────────────────────────────────
+def init_company_table(db_name):
+    conn = sqlite3.connect(db_name)
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS company_info (
+            id           INTEGER PRIMARY KEY,
+            logo         TEXT,
+            company_name TEXT,
+            phone        TEXT,
+            address      TEXT,
+            gst          TEXT,
+            footer       TEXT
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+
+def save_company_info(db_name, logo, company_name, phone, address, gst, footer):
+    conn = sqlite3.connect(db_name)
+    cursor = conn.cursor()
+    cursor.execute("SELECT id FROM company_info WHERE id=1")
+    exists = cursor.fetchone()
+    if exists:
+        cursor.execute("""
+            UPDATE company_info
+            SET logo=?, company_name=?, phone=?, address=?, gst=?, footer=?
+            WHERE id=1
+        """, (logo, company_name, phone, address, gst, footer))
+    else:
+        cursor.execute("""
+            INSERT INTO company_info (id, logo, company_name, phone, address, gst, footer)
+            VALUES (1, ?, ?, ?, ?, ?, ?)
+        """, (logo, company_name, phone, address, gst, footer))
+    conn.commit()
+    conn.close()
+
+
+def load_company_info(db_name):
+    conn = sqlite3.connect(db_name)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT logo, company_name, phone, address, gst, footer FROM company_info WHERE id=1"
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        return {
+            "logo"         : row[0] or "",
+            "company_name" : row[1] or "",
+            "phone"        : row[2] or "",
+            "address"      : row[3] or "",
+            "gst"          : row[4] or "",
+            "footer"       : row[5] or ""
+        }
+    return {}
 
 
 # ──────────────────────────────────────────
@@ -78,7 +141,7 @@ def verify_master_code(code):
 
 
 # ──────────────────────────────────────────
-#  USER FUNCTIONS  (all accept db_name)
+#  USER FUNCTIONS
 # ──────────────────────────────────────────
 def create_user(db_name, username, password, role="user"):
     user_secret    = pyotp.random_base32()
@@ -144,7 +207,6 @@ def get_all_usernames(db_name):
     return [row[0] for row in rows]
 
 
-
 # ──────────────────────────────────────────
 #  QR DISPLAY
 # ──────────────────────────────────────────
@@ -206,12 +268,12 @@ class AskDBName(QWidget):
         layout.setContentsMargins(40, 30, 40, 30)
         layout.setSpacing(16)
 
-        title = QLabel("🗄  Create New Database")
+        title = QLabel("🏢  Enter Company Name")
         title.setAlignment(Qt.AlignCenter)
         title.setStyleSheet("font-size: 16px; font-weight: bold; color: #1a7fe8;")
         layout.addWidget(title)
 
-        sub = QLabel("Enter a name for your database file.")
+        sub = QLabel("This will be used as your company name.")
         sub.setAlignment(Qt.AlignCenter)
         sub.setStyleSheet("font-size: 12px; color: #777;")
         layout.addWidget(sub)
@@ -233,7 +295,7 @@ class AskDBName(QWidget):
         name = self.db_input.text().strip()
 
         if not name:
-            QMessageBox.warning(self, "Error", "Please enter a database name.")
+            QMessageBox.warning(self, "Error", "Please enter a Company name.")
             return
 
         name = name.replace(" ", "_")
@@ -263,6 +325,7 @@ class StartupAuth(QWidget):
 
         self.setWindowTitle("Security Verification")
         self.setFixedSize(420, 240)
+        
 
         layout = QVBoxLayout()
         layout.setContentsMargins(40, 30, 40, 30)
@@ -301,17 +364,25 @@ class StartupAuth(QWidget):
             self.otp_input.clear()
             return
 
-        # ✅ Correct — create DB now
         init_db(self.db_name)
+
+        # Save company name as default in DB
+        company_display_name = self.db_name.replace(".db", "").replace("_", " ").title()
+        save_company_info(self.db_name, "", company_display_name, "", "", "", "")
 
         QMessageBox.information(
             self, "Database Created",
             f"✅  '{self.db_name}' created successfully!\nNow create the first user."
         )
 
-        self.signup = SignupForm(self.db_name)
-        self.signup.show()
+        self.company_form = CompanySettings(self.db_name)
+        self.company_form.show()
+        self.company_form.destroyed.connect(self._open_signup)
         self.close()
+
+        def _open_signup(self):
+            self.signup = SignupForm(self.db_name)
+            self.signup.show()
 
 
 # ──────────────────────────────────────────
@@ -409,11 +480,21 @@ class SignupForm(QWidget):
         if result["success"]:
             self.qr = QRDisplay(result["secret"], result["qr_path"], result["recovery_codes"])
             self.login_window = LoginForm(self.db_name)
-            self.qr.destroyed.connect(lambda: self.login_window.show())
+            self.login_window  # keep reference alive
+            db = self.db_name
+
+            def open_login():
+                from PyQt5.QtWidgets import QApplication
+                win = LoginForm(db)
+                win.show()
+                QApplication.instance()._login_ref = win  # prevent GC
+
+            self.qr.destroyed.connect(open_login)
             self.qr.show()
             self.close()
         else:
             QMessageBox.warning(self, "Error", result["message"])
+
 
 # ──────────────────────────────────────────
 #  LOGIN
@@ -528,13 +609,151 @@ class LoginForm(QWidget):
 
 
 # ──────────────────────────────────────────
+#  COMPANY SETTINGS
+# ──────────────────────────────────────────
+class CompanySettings(QWidget):
+
+    def __init__(self, db_name):
+        super().__init__()
+        self.db_name   = db_name
+        self.logo_path = ""
+
+        self.setWindowTitle("Company Settings")
+        self.setFixedSize(450, 580)
+
+        layout = QVBoxLayout()
+        layout.setContentsMargins(35, 25, 35, 25)
+        layout.setSpacing(14)
+
+        title = QLabel("🏢  Company Settings")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #1a7fe8;")
+        layout.addWidget(title)
+
+        # --- Logo row ---
+        self.logo_label = QLabel()
+        self.logo_label.setFixedSize(90, 90)
+        self.logo_label.setAlignment(Qt.AlignCenter)
+        self.logo_label.setStyleSheet(
+            "border: 2px dashed #4da3ff; border-radius: 8px; color: #aaa;"
+        )
+        self.logo_label.setText("No Logo")
+
+        logo_btn = QPushButton("Upload Logo")
+        logo_btn.setFixedHeight(30)
+        logo_btn.clicked.connect(self.upload_logo)
+
+        logo_row = QHBoxLayout()
+        logo_row.addStretch()
+        logo_row.addWidget(self.logo_label)
+        logo_row.addSpacing(12)
+        logo_row.addWidget(logo_btn)
+        logo_row.addStretch()
+        layout.addLayout(logo_row)
+
+        # --- Fields grid ---
+        grid = QGridLayout()
+        grid.setSpacing(10)
+        grid.setColumnMinimumWidth(0, 120)
+        grid.setColumnMinimumWidth(1, 230)
+
+        self.company_name = QLineEdit()
+        self.company_name.setPlaceholderText("Company name")
+        self.company_name.setMinimumHeight(34)
+
+        self.phone = QLineEdit()
+        self.phone.setPlaceholderText("Phone number")
+        self.phone.setMinimumHeight(34)
+
+        self.address = QLineEdit()
+        self.address.setPlaceholderText("Address")
+        self.address.setMinimumHeight(34)
+
+        self.gst = QLineEdit()
+        self.gst.setPlaceholderText("GST number")
+        self.gst.setMinimumHeight(34)
+
+        # Footer as paragraph (QTextEdit)
+        self.footer = QTextEdit()
+        self.footer.setPlaceholderText("Footer message / description (paragraph)")
+        self.footer.setMinimumHeight(90)
+        self.footer.setMaximumHeight(110)
+
+        grid.addWidget(QLabel("Company Name"), 0, 0)
+        grid.addWidget(self.company_name,       0, 1)
+        grid.addWidget(QLabel("Phone"),        1, 0)
+        grid.addWidget(self.phone,              1, 1)
+        grid.addWidget(QLabel("Address"),      2, 0)
+        grid.addWidget(self.address,            2, 1)
+        grid.addWidget(QLabel("GST No"),       3, 0)
+        grid.addWidget(self.gst,                3, 1)
+        grid.addWidget(QLabel("Footer"),       4, 0)
+        grid.addWidget(self.footer,             4, 1)
+
+        layout.addLayout(grid)
+
+        btn = QPushButton("Save Settings")
+        btn.setMinimumHeight(38)
+        btn.clicked.connect(self.save_settings)
+        layout.addWidget(btn)
+
+        self.setLayout(layout)
+        self.load_settings()
+
+    def upload_logo(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select Logo", "", "Images (*.png *.jpg *.jpeg *.bmp)"
+        )
+        if path:
+            self.logo_path = path
+            pixmap = QPixmap(path).scaled(
+                90, 90, Qt.KeepAspectRatio, Qt.SmoothTransformation
+            )
+            self.logo_label.setPixmap(pixmap)
+            self.logo_label.setText("")
+
+    def save_settings(self):
+        save_company_info(
+            self.db_name,
+            self.logo_path,
+            self.company_name.text().strip(),
+            self.phone.text().strip(),
+            self.address.text().strip(),
+            self.gst.text().strip(),
+            self.footer.toPlainText().strip()
+        )
+        QMessageBox.information(self, "Saved", "✅ Settings saved successfully!")
+
+    def load_settings(self):
+        data = load_company_info(self.db_name)
+        if not data:
+            # Default company name from db filename
+            default_name = self.db_name.replace(".db", "").replace("_", " ").title()
+            self.company_name.setText(default_name)
+            return
+        self.company_name.setText(data.get("company_name", ""))
+        self.phone.setText(data.get("phone", ""))
+        self.address.setText(data.get("address", ""))
+        self.gst.setText(data.get("gst", ""))
+        self.footer.setPlainText(data.get("footer", ""))
+        logo = data.get("logo", "")
+        if logo and os.path.exists(logo):
+            self.logo_path = logo
+            pixmap = QPixmap(logo).scaled(
+                90, 90, Qt.KeepAspectRatio, Qt.SmoothTransformation
+            )
+            self.logo_label.setPixmap(pixmap)
+            self.logo_label.setText("")
+
+
+# ──────────────────────────────────────────
 #  DASHBOARD
 # ──────────────────────────────────────────
 class Dashboard(QWidget):
 
     def __init__(self, db_name, username="User"):
         super().__init__()
-        self.db_name  = db_name
+        self.db_name = db_name
 
         self.setWindowTitle("Evo Aura Billing")
         self.showMaximized()
@@ -552,7 +771,15 @@ class Dashboard(QWidget):
         top_layout = QHBoxLayout(top_frame)
         top_layout.setContentsMargins(20, 5, 20, 5)
 
-        app_name = QLabel("⚡ Evo Aura")
+        logo = QLabel()
+        logo.setFixedSize(40, 40)
+        pixmap = QPixmap("witness.png")
+        if not pixmap.isNull():
+            logo.setPixmap(
+                pixmap.scaled(logo.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            )
+
+        app_name = QLabel("Evo Aura")
         app_name.setFont(QFont("Segoe UI", 14, QFont.Bold))
         app_name.setStyleSheet("color: #1a7fe8;")
 
@@ -564,9 +791,26 @@ class Dashboard(QWidget):
         user_label = QLabel(f"👤  {username}")
         user_label.setFont(QFont("Segoe UI", 11))
 
+        settings_btn = QPushButton("⚙️ Settings")
+        settings_btn.setCursor(Qt.PointingHandCursor)
+        settings_btn.setFixedHeight(32)
+        settings_btn.setFixedWidth(95)
+        settings_btn.setStyleSheet("""
+            QPushButton {
+                background-color : #eef5ff;
+                color            : #1a7fe8;
+                border-radius    : 6px;
+                padding          : 4px 10px;
+                font-weight      : bold;
+                border           : 1px solid #4da3ff;
+            }
+            QPushButton:hover { background-color: #ddeeff; }
+        """)
+        settings_btn.clicked.connect(self.open_settings)
+
         logout_btn = QPushButton("Logout")
         logout_btn.setCursor(Qt.PointingHandCursor)
-        logout_btn.setFixedHeight(30)
+        logout_btn.setFixedHeight(32)
         logout_btn.setStyleSheet("""
             QPushButton {
                 background-color : #ff5c5c;
@@ -580,11 +824,13 @@ class Dashboard(QWidget):
         """)
         logout_btn.clicked.connect(self.close)
 
+        top_layout.addWidget(logo)
         top_layout.addWidget(app_name)
         top_layout.addStretch()
         top_layout.addWidget(dash_title)
         top_layout.addStretch()
         top_layout.addWidget(user_label)
+        top_layout.addWidget(settings_btn)
         top_layout.addWidget(logout_btn)
 
         main_layout.addWidget(top_frame)
@@ -626,17 +872,21 @@ class Dashboard(QWidget):
             btn.clicked.connect(lambda: self.coming_soon(action))
             return btn
 
-        grid.addWidget(make_card_btn("⊞   Add Product",     "Add Product"), 0, 0)
-        grid.addWidget(make_card_btn("🛒   Sale",            "Sale"),        0, 1)
-        grid.addWidget(make_card_btn("👥   Users",           "Users"),       1, 0)
-        grid.addWidget(make_card_btn("📊   Report Insights", "Report"),      1, 1)
-        grid.addWidget(make_card_btn("🧾   Bill View",       "Bill View"),   2, 0, 1, 2)
+        grid.addWidget(make_card_btn("✚   Add Product",      "Add Product"), 0, 0)
+        grid.addWidget(make_card_btn("🏷️   Sale",             "Sale"),        0, 1)
+        grid.addWidget(make_card_btn("🔁   Return",            "Return"),      1, 0)
+        grid.addWidget(make_card_btn("🧾   Bill Views",        "Bill View"),   1, 1)
+        grid.addWidget(make_card_btn("📊   Report Insights",   "Report"),      2, 0, 1, 2)
 
         card_layout.addLayout(grid)
         card.setLayout(card_layout)
         main_layout.addWidget(card)
 
         self.setLayout(main_layout)
+
+    def open_settings(self):
+        self.settings_win = CompanySettings(self.db_name)
+        self.settings_win.show()
 
     def coming_soon(self, page):
         QMessageBox.information(self, page, f"{page} — Coming Soon 🚀")
