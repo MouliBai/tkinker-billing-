@@ -427,10 +427,10 @@ class StartupAuth(QWidget):
         self.company_form.show()
         self.company_form.destroyed.connect(self._open_signup)
         self.close()
-
-        def _open_signup(self):
+    def _open_signup(self):
             self.signup = SignupForm(self.db_name)
             self.signup.show()
+    
 
 # ──────────────────────────────────────────
 #  SIGNUP
@@ -656,16 +656,6 @@ class LoginForm(QWidget):
 # ──────────────────────────────────────────
 #  COMPANY SETTINGS
 # ──────────────────────────────────────────
-import sqlite3
-
-from PyQt5.QtWidgets import (
-    QWidget, QLabel, QPushButton, QLineEdit,
-    QGridLayout, QMessageBox, QVBoxLayout,
-    QHBoxLayout, QTextEdit, QFileDialog
-)
-from PyQt5.QtGui import QPixmap
-from PyQt5.QtCore import Qt
-
 
 class CompanySettings(QWidget):
 
@@ -827,19 +817,28 @@ class CompanySettings(QWidget):
 
     # ---------------- SAVE ----------------
     def save_settings(self):
-        save_company_info(
-            self.db_name,
-            self.logo_path,
-            self.company_name.text().strip(),
-            self.phone.text().strip(),
-            self.address.text().strip(),
-            self.gst.text().strip(),
-            self.footer.toPlainText().strip()
-        )
+        try:
+            save_company_info(
+                self.db_name,
+                self.logo_path,
+                self.company_name.text().strip(),
+                self.phone.text().strip(),
+                self.address.text().strip(),
+                self.gst.text().strip(),
+                self.footer.toPlainText().strip()
+            )
 
-        QMessageBox.information(
-            self, "Saved", "✅ Settings saved successfully!"
-        )
+            # ✅ success message
+            QMessageBox.information(self, "Success", "Company settings saved successfully!")
+
+            # ✅ close the window
+            self.close()   # use self.accept() if QDialog
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", str(e))
+            QMessageBox.information(
+                self, "Saved", "✅ Settings saved successfully!"
+            )
 
     # ---------------- LOAD ----------------
     def load_settings(self):
