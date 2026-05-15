@@ -4,7 +4,6 @@ import glob
 import sqlite3
 import random
 import string
-
 import pyotp
 import qrcode
 
@@ -18,9 +17,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtGui import QPixmap, QFont, QIcon
 from PyQt5.QtCore import Qt
 
-
 MASTER_SECRET = "KRSXG5DSNFXGOIDB"
-
 
 # ──────────────────────────────────────────
 #  DATABASE
@@ -42,7 +39,6 @@ def init_db(db_name):
     conn.close()
     init_company_table(db_name)
 
-
 def has_users(db_name):
     conn = sqlite3.connect(db_name)
     cursor = conn.cursor()
@@ -50,7 +46,6 @@ def has_users(db_name):
     count = cursor.fetchone()[0]
     conn.close()
     return count > 0
-
 
 # ──────────────────────────────────────────
 #  COMPANY INFO TABLE
@@ -61,7 +56,7 @@ def init_company_table(db_name):
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS company_info (
             id           INTEGER PRIMARY KEY,
-            logo         TEXT,
+            logo         BLOB,
             company_name TEXT,
             phone        TEXT,
             address      TEXT,
@@ -72,47 +67,70 @@ def init_company_table(db_name):
     conn.commit()
     conn.close()
 
-
-def save_company_info(db_name, logo, company_name, phone, address, gst, footer):
+def save_company_info(db_name, logo_path, company_name, phone, address, gst, footer):
     conn = sqlite3.connect(db_name)
     cursor = conn.cursor()
+
+    logo_data = None
+    if logo_path and os.path.exists(logo_path):
+        with open(logo_path, "rb") as f:
+            logo_data = f.read()   # ✅ ORIGINAL IMAGE STORED
+
     cursor.execute("SELECT id FROM company_info WHERE id=1")
     exists = cursor.fetchone()
+
     if exists:
         cursor.execute("""
             UPDATE company_info
             SET logo=?, company_name=?, phone=?, address=?, gst=?, footer=?
             WHERE id=1
-        """, (logo, company_name, phone, address, gst, footer))
+        """, (logo_data, company_name, phone, address, gst, footer))
     else:
         cursor.execute("""
             INSERT INTO company_info (id, logo, company_name, phone, address, gst, footer)
             VALUES (1, ?, ?, ?, ?, ?, ?)
-        """, (logo, company_name, phone, address, gst, footer))
+        """, (logo_data, company_name, phone, address, gst, footer))
+
     conn.commit()
     conn.close()
-
 
 def load_company_info(db_name):
     conn = sqlite3.connect(db_name)
     cursor = conn.cursor()
-    cursor.execute(
-        "SELECT logo, company_name, phone, address, gst, footer FROM company_info WHERE id=1"
-    )
+
+    cursor.execute("""
+        SELECT logo, company_name, phone, address, gst, footer
+        FROM company_info WHERE id=1
+    """)
     row = cursor.fetchone()
     conn.close()
-    if row:
-        return {
-            "logo"         : row[0] or "",
-            "company_name" : row[1] or "",
-            "phone"        : row[2] or "",
-            "address"      : row[3] or "",
-            "gst"          : row[4] or "",
-            "footer"       : row[5] or ""
-        }
-    return {}
 
+    if not row:
+        return {}
 
+    logo_blob = row[0]
+
+    pixmap = QPixmap()
+    pixmap = QPixmap()
+
+    if logo_blob:
+        # ✅ Case 1: OLD DATA (string path)
+        if isinstance(logo_blob, str):
+            if os.path.exists(logo_blob):
+                pixmap.load(logo_blob)
+
+        # ✅ Case 2: NEW DATA (BLOB)
+        elif isinstance(logo_blob, (bytes, bytearray)):
+            pixmap.loadFromData(logo_blob)
+
+    return {
+        "logo"         : pixmap,
+        "company_name" : row[1] or "",
+        "phone"        : row[2] or "",
+        "address"      : row[3] or "",
+        "gst"          : row[4] or "",
+        "footer"       : row[5] or ""
+    }
 # ──────────────────────────────────────────
 #  HELPERS
 # ──────────────────────────────────────────
@@ -121,7 +139,6 @@ def generate_recovery_codes():
         ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
         for _ in range(5)
     ]
-
 
 def generate_qr(secret, username):
     uri = pyotp.TOTP(secret).provisioning_uri(
@@ -133,13 +150,11 @@ def generate_qr(secret, username):
     img.save(path)
     return path
 
-
 # ──────────────────────────────────────────
 #  MASTER CODE
 # ──────────────────────────────────────────
 def verify_master_code(code):
     return pyotp.TOTP(MASTER_SECRET).verify(code)
-
 
 # ──────────────────────────────────────────
 #  USER FUNCTIONS
@@ -168,7 +183,6 @@ def create_user(db_name, username, password, role="user"):
     finally:
         conn.close()
 
-
 def login_user(db_name, username, password):
     conn   = sqlite3.connect(db_name)
     cursor = conn.cursor()
@@ -194,10 +208,8 @@ def login_user(db_name, username, password):
         "recovery_codes" : recovery_codes.split(",") if recovery_codes else []
     }
 
-
 def verify_otp(secret, otp):
     return pyotp.TOTP(secret).verify(otp)
-
 
 def get_all_usernames(db_name):
     conn   = sqlite3.connect(db_name)
@@ -206,7 +218,6 @@ def get_all_usernames(db_name):
     rows = cursor.fetchall()
     conn.close()
     return [row[0] for row in rows]
-
 
 # ──────────────────────────────────────────
 #  QR DISPLAY
@@ -292,7 +303,6 @@ class QRDisplay(QWidget):
             "Recovery codes copied to clipboard ✅"
         )
 
-
 # ──────────────────────────────────────────
 #  STEP 1 — ASK DB NAME
 # ──────────────────────────────────────────
@@ -351,7 +361,6 @@ class AskDBName(QWidget):
         self.auth = StartupAuth(name)
         self.auth.show()
         self.close()
-
 
 # ──────────────────────────────────────────
 #  STEP 2 — MASTER CODE VERIFICATION
@@ -422,7 +431,6 @@ class StartupAuth(QWidget):
         def _open_signup(self):
             self.signup = SignupForm(self.db_name)
             self.signup.show()
-
 
 # ──────────────────────────────────────────
 #  SIGNUP
@@ -533,7 +541,6 @@ class SignupForm(QWidget):
             self.close()
         else:
             QMessageBox.warning(self, "Error", result["message"])
-
 
 # ──────────────────────────────────────────
 #  LOGIN
@@ -646,15 +653,25 @@ class LoginForm(QWidget):
         self.signup.show()
         self.signup.destroyed.connect(self.load_usernames)
 
-
 # ──────────────────────────────────────────
 #  COMPANY SETTINGS
 # ──────────────────────────────────────────
+import sqlite3
+
+from PyQt5.QtWidgets import (
+    QWidget, QLabel, QPushButton, QLineEdit,
+    QGridLayout, QMessageBox, QVBoxLayout,
+    QHBoxLayout, QTextEdit, QFileDialog
+)
+from PyQt5.QtGui import QPixmap
+from PyQt5.QtCore import Qt
+
+
 class CompanySettings(QWidget):
 
     def __init__(self, db_name):
         super().__init__()
-        self.db_name   = db_name
+        self.db_name = db_name
         self.logo_path = ""
 
         self.setWindowTitle("Company Settings")
@@ -664,12 +681,15 @@ class CompanySettings(QWidget):
         layout.setContentsMargins(35, 25, 35, 25)
         layout.setSpacing(14)
 
+        # --- TITLE ---
         title = QLabel("🏢  Company Settings")
         title.setAlignment(Qt.AlignCenter)
-        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #1a7fe8;")
+        title.setStyleSheet(
+            "font-size: 16px; font-weight: bold; color: #1a7fe8;"
+        )
         layout.addWidget(title)
 
-        # --- Logo row ---
+        # --- LOGO SECTION ---
         self.logo_label = QLabel()
         self.logo_label.setFixedSize(90, 90)
         self.logo_label.setAlignment(Qt.AlignCenter)
@@ -678,19 +698,32 @@ class CompanySettings(QWidget):
         )
         self.logo_label.setText("No Logo")
 
-        logo_btn = QPushButton("Upload Logo")
-        logo_btn.setFixedHeight(30)
-        logo_btn.clicked.connect(self.upload_logo)
+        upload_btn = QPushButton("Upload Logo")
+        upload_btn.setFixedHeight(30)
+        upload_btn.clicked.connect(self.upload_logo)
+
+        remove_btn = QPushButton("Remove Logo")
+        remove_btn.setFixedHeight(30)
+        remove_btn.setStyleSheet(
+            "background-color:#ff4d4d; color:white;"
+        )
+        remove_btn.clicked.connect(self.remove_logo)
 
         logo_row = QHBoxLayout()
         logo_row.addStretch()
         logo_row.addWidget(self.logo_label)
         logo_row.addSpacing(12)
-        logo_row.addWidget(logo_btn)
+
+        btn_col = QVBoxLayout()
+        btn_col.addWidget(upload_btn)
+        btn_col.addWidget(remove_btn)
+
+        logo_row.addLayout(btn_col)
         logo_row.addStretch()
+
         layout.addLayout(logo_row)
 
-        # --- Fields grid ---
+        # --- FORM FIELDS ---
         grid = QGridLayout()
         grid.setSpacing(10)
         grid.setColumnMinimumWidth(0, 120)
@@ -712,45 +745,87 @@ class CompanySettings(QWidget):
         self.gst.setPlaceholderText("GST number")
         self.gst.setMinimumHeight(34)
 
-        # Footer as paragraph (QTextEdit)
         self.footer = QTextEdit()
-        self.footer.setPlaceholderText("Footer message / description (paragraph)")
+        self.footer.setPlaceholderText("Footer message / description")
         self.footer.setMinimumHeight(90)
         self.footer.setMaximumHeight(110)
 
         grid.addWidget(QLabel("Company Name"), 0, 0)
-        grid.addWidget(self.company_name,       0, 1)
-        grid.addWidget(QLabel("Phone"),        1, 0)
-        grid.addWidget(self.phone,              1, 1)
-        grid.addWidget(QLabel("Address"),      2, 0)
-        grid.addWidget(self.address,            2, 1)
-        grid.addWidget(QLabel("GST No"),       3, 0)
-        grid.addWidget(self.gst,                3, 1)
-        grid.addWidget(QLabel("Footer"),       4, 0)
-        grid.addWidget(self.footer,             4, 1)
+        grid.addWidget(self.company_name, 0, 1)
+
+        grid.addWidget(QLabel("Phone"), 1, 0)
+        grid.addWidget(self.phone, 1, 1)
+
+        grid.addWidget(QLabel("Address"), 2, 0)
+        grid.addWidget(self.address, 2, 1)
+
+        grid.addWidget(QLabel("GST No"), 3, 0)
+        grid.addWidget(self.gst, 3, 1)
+
+        grid.addWidget(QLabel("Footer"), 4, 0)
+        grid.addWidget(self.footer, 4, 1)
 
         layout.addLayout(grid)
 
-        btn = QPushButton("Save Settings")
-        btn.setMinimumHeight(38)
-        btn.clicked.connect(self.save_settings)
-        layout.addWidget(btn)
+        # --- SAVE BUTTON ---
+        save_btn = QPushButton("Save Settings")
+        save_btn.setMinimumHeight(38)
+        save_btn.clicked.connect(self.save_settings)
+        layout.addWidget(save_btn)
 
         self.setLayout(layout)
+
         self.load_settings()
 
+    # ---------------- UPLOAD LOGO ----------------
     def upload_logo(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Select Logo", "", "Images (*.png *.jpg *.jpeg *.bmp)"
+            self, "Select Logo", "",
+            "Images (*.png *.jpg *.jpeg *.bmp)"
         )
         if path:
             self.logo_path = path
-            pixmap = QPixmap(path).scaled(
-                90, 90, Qt.KeepAspectRatio, Qt.SmoothTransformation
-            )
-            self.logo_label.setPixmap(pixmap)
-            self.logo_label.setText("")
 
+            pixmap = QPixmap(path)
+            if not pixmap.isNull():
+                self.logo_label.setPixmap(
+                    pixmap.scaled(
+                        90, 90,
+                        Qt.KeepAspectRatio,
+                        Qt.SmoothTransformation
+                    )
+                )
+                self.logo_label.setText("")
+
+    # ---------------- REMOVE LOGO ----------------
+    def remove_logo(self):
+        reply = QMessageBox.question(
+            self,
+            "Remove Logo",
+            "Are you sure you want to remove the logo?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+
+        if reply == QMessageBox.No:
+            return
+
+        # clear UI
+        self.logo_label.clear()
+        self.logo_label.setText("No Logo")
+        self.logo_path = ""
+
+        # update DB
+        conn = sqlite3.connect(self.db_name)
+        cursor = conn.cursor()
+        cursor.execute("UPDATE company SET logo=''")
+        conn.commit()
+        conn.close()
+
+        QMessageBox.information(
+            self, "Done", "Logo removed successfully"
+        )
+
+    # ---------------- SAVE ----------------
     def save_settings(self):
         save_company_info(
             self.db_name,
@@ -761,34 +836,50 @@ class CompanySettings(QWidget):
             self.gst.text().strip(),
             self.footer.toPlainText().strip()
         )
-        QMessageBox.information(self, "Saved", "✅ Settings saved successfully!")
 
+        QMessageBox.information(
+            self, "Saved", "✅ Settings saved successfully!"
+        )
+
+    # ---------------- LOAD ----------------
     def load_settings(self):
         data = load_company_info(self.db_name)
+
         if not data:
-            # Default company name from db filename
-            default_name = self.db_name.replace(".db", "").replace("_", " ").title()
+            default_name = self.db_name.replace(
+                ".db", ""
+            ).replace("_", " ").title()
+
             self.company_name.setText(default_name)
             return
+
         self.company_name.setText(data.get("company_name", ""))
         self.phone.setText(data.get("phone", ""))
         self.address.setText(data.get("address", ""))
         self.gst.setText(data.get("gst", ""))
         self.footer.setPlainText(data.get("footer", ""))
-        logo = data.get("logo", "")
-        if logo and os.path.exists(logo):
-            self.logo_path = logo
-            pixmap = QPixmap(logo).scaled(
-                90, 90, Qt.KeepAspectRatio, Qt.SmoothTransformation
-            )
-            self.logo_label.setPixmap(pixmap)
-            self.logo_label.setText("")
 
+        logo = data.get("logo")
+
+        # FIXED: load from path correctly
+        if logo:
+            pixmap = QPixmap(logo)
+            if not pixmap.isNull():
+                self.logo_label.setPixmap(
+                    pixmap.scaled(
+                        90, 90,
+                        Qt.KeepAspectRatio,
+                        Qt.SmoothTransformation
+                    )
+                )
+                self.logo_label.setText("")
+            else:
+                self.logo_label.setText("No Logo")
+        else:
+            self.logo_label.setText("No Logo")
 # ──────────────────────────────────────────
 #  DASHBOARD
 # ──────────────────────────────────────────
-
-
 
 class Dashboard(QWidget):
 
@@ -798,7 +889,7 @@ class Dashboard(QWidget):
 
         company = load_company_info(self.db_name)
         company_name = company.get("company_name", "Your Company")
-        img_path = company.get("logo", "")
+        logo_pixmap = company.get("logo")
 
         self.setWindowTitle("Evo Aura Billing")
         self.showMaximized()
@@ -904,29 +995,29 @@ class Dashboard(QWidget):
         card_layout.setContentsMargins(50, 30, 50, 30)
         card_layout.setSpacing(20)
 
-        # ── WELCOME SECTION ──
-        if img_path:
+            
+        # ── WELCOME SECTION    IMAGE ──
+        if logo_pixmap and not logo_pixmap.isNull():
             container = QWidget()
             layout = QHBoxLayout(container)
             layout.setContentsMargins(0, 0, 0, 0)
             layout.setSpacing(10)
 
             img_label = QLabel()
-            img_label.setFixedSize(100, 100)
+            img_label.setFixedSize(200, 200)
 
-            pixmap = QPixmap(img_path)
-            if not pixmap.isNull():
-                img_label.setPixmap(
-                    pixmap.scaled(
-                        img_label.size(),
-                        Qt.KeepAspectRatio,
-                        Qt.SmoothTransformation
-                    )
+            img_label.setPixmap(
+                logo_pixmap.scaled(
+                    img_label.size(),
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation
                 )
+            )
 
             welcome = QLabel(f"Welcome, {company_name}")
             welcome.setFont(QFont("Segoe UI", 26, QFont.Bold))
 
+            # ✅ Proper LEFT → RIGHT layout
             layout.addStretch()
             layout.addWidget(img_label)
             layout.addWidget(welcome)
