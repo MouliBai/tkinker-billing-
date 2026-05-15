@@ -214,24 +214,33 @@ class QRDisplay(QWidget):
 
     def __init__(self, secret, qr_path, recovery_codes):
         super().__init__()
+
+        self.secret = secret
+        self.recovery_codes = recovery_codes
+
         self.setWindowTitle("Setup 2FA")
-        self.setFixedSize(420, 530)
+        self.setFixedSize(420, 560)
 
         layout = QVBoxLayout()
         layout.setContentsMargins(25, 20, 25, 20)
         layout.setSpacing(12)
 
+        # ── TITLE ──
         title = QLabel("📱  Scan QR in Authenticator App")
         title.setAlignment(Qt.AlignCenter)
         title.setStyleSheet("font-size: 14px; font-weight: bold; color: #1a7fe8;")
         layout.addWidget(title)
 
+        # ── QR IMAGE ──
         qr_label = QLabel()
-        pixmap   = QPixmap(qr_path).scaled(200, 200, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        pixmap = QPixmap(qr_path).scaled(
+            200, 200, Qt.KeepAspectRatio, Qt.SmoothTransformation
+        )
         qr_label.setPixmap(pixmap)
         qr_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(qr_label)
 
+        # ── SECRET ──
         lbl_s = QLabel(f"🔑  Secret Key:\n{secret}")
         lbl_s.setWordWrap(True)
         lbl_s.setStyleSheet(
@@ -239,19 +248,48 @@ class QRDisplay(QWidget):
         )
         layout.addWidget(lbl_s)
 
-        lbl_r = QLabel("🛡  Recovery Codes (save these!):\n" + "\n".join(recovery_codes))
-        lbl_r.setWordWrap(True)
-        lbl_r.setStyleSheet(
+        # ── RECOVERY CODES ──
+        self.lbl_r = QLabel(
+            "🛡  Recovery Codes (save these!):\n" + "\n".join(recovery_codes)
+        )
+        self.lbl_r.setWordWrap(True)
+        self.lbl_r.setStyleSheet(
             "font-size: 12px; background:#fff7e6; padding:8px; border-radius:5px;"
         )
-        layout.addWidget(lbl_r)
+        layout.addWidget(self.lbl_r)
 
-        btn = QPushButton("✅  Done")
-        btn.setMinimumHeight(38)
-        btn.clicked.connect(self.close)
-        layout.addWidget(btn)
+        # ── BUTTON ROW ──
+        btn_row = QHBoxLayout()
+
+        copy_btn = QPushButton("📋 Copy Codes")
+        copy_btn.setCursor(Qt.PointingHandCursor)
+        copy_btn.setMinimumHeight(34)
+        copy_btn.clicked.connect(self.copy_codes)
+
+        done_btn = QPushButton("✅ Done")
+        done_btn.setMinimumHeight(34)
+        done_btn.clicked.connect(self.close)
+
+        btn_row.addWidget(copy_btn)
+        btn_row.addWidget(done_btn)
+
+        layout.addLayout(btn_row)
 
         self.setLayout(layout)
+
+    # ─────────────────────────────
+    # COPY TO CLIPBOARD
+    # ─────────────────────────────
+    def copy_codes(self):
+        clipboard = QApplication.clipboard()
+        text = "\n".join(self.recovery_codes)
+        clipboard.setText(text)
+
+        QMessageBox.information(
+            self,
+            "Copied",
+            "Recovery codes copied to clipboard ✅"
+        )
 
 
 # ──────────────────────────────────────────
@@ -745,15 +783,27 @@ class CompanySettings(QWidget):
             self.logo_label.setPixmap(pixmap)
             self.logo_label.setText("")
 
-
 # ──────────────────────────────────────────
 #  DASHBOARD
 # ──────────────────────────────────────────
+from PyQt5.QtWidgets import (
+    QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout,
+    QFrame, QGridLayout, QMessageBox, QInputDialog, QLineEdit
+)
+from PyQt5.QtGui import QFont, QPixmap
+from PyQt5.QtCore import Qt
+import sqlite3
+
+
 class Dashboard(QWidget):
 
     def __init__(self, db_name, username="User"):
         super().__init__()
         self.db_name = db_name
+
+        company = load_company_info(self.db_name)
+        company_name = company.get("company_name", "Your Company")
+        img_path = company.get("logo", "")
 
         self.setWindowTitle("Evo Aura Billing")
         self.showMaximized()
@@ -773,7 +823,7 @@ class Dashboard(QWidget):
 
         logo = QLabel()
         logo.setFixedSize(40, 40)
-        pixmap = QPixmap("witness.png")
+        pixmap = QPixmap("icon/auralogo.png")
         if not pixmap.isNull():
             logo.setPixmap(
                 pixmap.scaled(logo.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
@@ -786,10 +836,23 @@ class Dashboard(QWidget):
         dash_title = QLabel("Dashboard")
         dash_title.setFont(QFont("Segoe UI", 16, QFont.Bold))
         dash_title.setAlignment(Qt.AlignCenter)
-        dash_title.setStyleSheet("background: transparent;")
 
-        user_label = QLabel(f"👤  {username}")
-        user_label.setFont(QFont("Segoe UI", 11))
+        # 👨🏻‍💼 USER BUTTON
+        user_btn = QPushButton(f"👨🏻‍💼  {username}")
+        user_btn.setCursor(Qt.PointingHandCursor)
+        user_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                border: none;
+                font-size: 16px;
+                padding: 4px 8px;
+            }
+            QPushButton:hover {
+                background: #eef5ff;
+                border-radius: 6px;
+            }
+        """)
+        user_btn.clicked.connect(lambda: self.open_user_security(username))
 
         settings_btn = QPushButton("⚙️ Settings")
         settings_btn.setCursor(Qt.PointingHandCursor)
@@ -798,7 +861,6 @@ class Dashboard(QWidget):
         settings_btn.setStyleSheet("""
             QPushButton {
                 background-color : #eef5ff;
-                color            : #1a7fe8;
                 border-radius    : 6px;
                 padding          : 4px 10px;
                 font-weight      : bold;
@@ -829,26 +891,64 @@ class Dashboard(QWidget):
         top_layout.addStretch()
         top_layout.addWidget(dash_title)
         top_layout.addStretch()
-        top_layout.addWidget(user_label)
+        top_layout.addWidget(user_btn)
         top_layout.addWidget(settings_btn)
         top_layout.addWidget(logout_btn)
 
         main_layout.addWidget(top_frame)
-
-        # ── MAIN CARD ──
+        #-------------------------------------------------------
+        #                     ── MAIN CARD ──
+        #------------------------------------------------------
         card = QFrame()
-        card.setStyleSheet("background: white; border-radius: 14px; border: 1px solid #e6edf5;")
+        card.setStyleSheet("""
+            background: white;
+            border-radius: 14px;
+        """)
 
         card_layout = QVBoxLayout()
         card_layout.setContentsMargins(50, 30, 50, 30)
         card_layout.setSpacing(20)
 
-        welcome = QLabel(f"Welcome, {username} 👋")
-        welcome.setAlignment(Qt.AlignCenter)
-        welcome.setFont(QFont("Segoe UI", 22, QFont.Bold))
-        welcome.setStyleSheet("color: #1a7fe8; background: transparent;")
-        card_layout.addWidget(welcome)
+        # ── WELCOME SECTION ──
+        if img_path:
+            container = QWidget()
+            layout = QHBoxLayout(container)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setSpacing(10)
 
+            img_label = QLabel()
+            img_label.setFixedSize(100, 100)
+
+            pixmap = QPixmap(img_path)
+            if not pixmap.isNull():
+                img_label.setPixmap(
+                    pixmap.scaled(
+                        img_label.size(),
+                        Qt.KeepAspectRatio,
+                        Qt.SmoothTransformation
+                    )
+                )
+
+            welcome = QLabel(f"Welcome, {company_name}")
+            welcome.setFont(QFont("Segoe UI", 26, QFont.Bold))
+
+            layout.addStretch()
+            layout.addWidget(img_label)
+            layout.addWidget(welcome)
+            layout.addStretch()
+
+            container.setStyleSheet("background-color: #eef5ff;")
+            card_layout.addWidget(container)
+
+        else:
+            welcome = QLabel(f"Welcome, {company_name}")
+            welcome.setAlignment(Qt.AlignCenter)
+            welcome.setFont(QFont("Segoe UI", 26, QFont.Bold))
+            welcome.setStyleSheet("background-color: #eef5ff;")
+
+            card_layout.addWidget(welcome)
+
+        # ── GRID BUTTONS ──
         grid = QGridLayout()
         grid.setSpacing(20)
 
@@ -872,11 +972,11 @@ class Dashboard(QWidget):
             btn.clicked.connect(lambda: self.coming_soon(action))
             return btn
 
-        grid.addWidget(make_card_btn("✚   Add Product",      "Add Product"), 0, 0)
-        grid.addWidget(make_card_btn("🏷️   Sale",             "Sale"),        0, 1)
-        grid.addWidget(make_card_btn("🔁   Return",            "Return"),      1, 0)
-        grid.addWidget(make_card_btn("🧾   Bill Views",        "Bill View"),   1, 1)
-        grid.addWidget(make_card_btn("📊   Report Insights",   "Report"),      2, 0, 1, 2)
+        grid.addWidget(make_card_btn("✚   Add Product", "Add Product"), 0, 0)
+        grid.addWidget(make_card_btn("🏷️   Sale", "Sale"), 0, 1)
+        grid.addWidget(make_card_btn("🔁   Return", "Return"), 1, 0)
+        grid.addWidget(make_card_btn("🧾   Bill Views", "Bill View"), 1, 1)
+        grid.addWidget(make_card_btn("📊   Report Insights", "Report"), 2, 0, 1, 2)
 
         card_layout.addLayout(grid)
         card.setLayout(card_layout)
@@ -884,13 +984,58 @@ class Dashboard(QWidget):
 
         self.setLayout(main_layout)
 
+    # 🔐 USER SECURITY
+    def open_user_security(self, username):
+        otp, ok = QInputDialog.getText(
+            self,
+            "Verify Identity",
+            "Enter your 6-digit OTP:",
+            QLineEdit.Normal
+        )
+
+        if not ok or not otp:
+            return
+
+        if len(otp) != 6 or not otp.isdigit():
+            QMessageBox.warning(self, "Error", "Enter valid 6-digit code")
+            return
+
+        conn = sqlite3.connect(self.db_name)
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT otp_secret, recovery_codes
+            FROM users
+            WHERE username=?
+        """, (username,))
+
+        data = cursor.fetchone()
+        conn.close()
+
+        if not data:
+            QMessageBox.warning(self, "Error", "User not found")
+            return
+
+        secret, recovery_codes = data
+        recovery_codes = recovery_codes.split(",") if recovery_codes else []
+
+        if not verify_otp(secret, otp):
+            QMessageBox.warning(self, "Error", "Invalid OTP ❌")
+            return
+
+        qr_path = generate_qr(secret, username)
+
+        self.qr_view = QRDisplay(secret, qr_path, recovery_codes)
+        self.qr_view.show()
+
+    # ⚙️ SETTINGS
     def open_settings(self):
         self.settings_win = CompanySettings(self.db_name)
         self.settings_win.show()
 
+    # 🚀 COMING SOON
     def coming_soon(self, page):
         QMessageBox.information(self, page, f"{page} — Coming Soon 🚀")
-
 
 # ──────────────────────────────────────────
 #  MAIN ENTRY
