@@ -1,11 +1,20 @@
+"""
+EvoAura Billing Application
+────────────────────────────
+A PyQt5-based billing system with TOTP 2FA, user management, and company settings.
+"""
+
 import sys
 import os
 import glob
 import sqlite3
 import random
 import string
+
 import pyotp
 import qrcode
+
+os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
 
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QPushButton, QLabel,
@@ -13,221 +22,267 @@ from PyQt5.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QFrame, QComboBox,
     QCheckBox, QTextEdit, QFileDialog
 )
-
 from PyQt5.QtGui import QPixmap, QFont, QIcon
 from PyQt5.QtCore import Qt
 
-MASTER_SECRET = "KRSXG5DSNFXGOIDB"
 
-# ──────────────────────────────────────────
-#  DATABASE
-# ──────────────────────────────────────────
-def init_db(db_name):
-    conn = sqlite3.connect(db_name)
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id             INTEGER PRIMARY KEY AUTOINCREMENT,
-            username       TEXT UNIQUE,
-            password       TEXT,
-            role           TEXT,
-            otp_secret     TEXT,
-            recovery_codes TEXT
-        )
-    """)
-    conn.commit()
-    conn.close()
-    init_company_table(db_name)
+# ─────────────────────────────────────────────────────────────
+#  CONSTANTS
+# ─────────────────────────────────────────────────────────────
 
-def has_users(db_name):
-    conn = sqlite3.connect(db_name)
-    cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) FROM users")
-    count = cursor.fetchone()[0]
-    conn.close()
-    return count > 0
+MASTER_SECRET = "KRSXG5DSNFXGOIDB"   # TOTP secret used for all master-code checks
 
-# ──────────────────────────────────────────
-#  COMPANY INFO TABLE
-# ──────────────────────────────────────────
-def init_company_table(db_name):
-    conn = sqlite3.connect(db_name)
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS company_info (
-            id           INTEGER PRIMARY KEY,
-            logo         BLOB,
-            company_name TEXT,
-            phone        TEXT,
-            address      TEXT,
-            gst          TEXT,
-            footer       TEXT
-        )
-    """)
-    conn.commit()
-    conn.close()
 
-def save_company_info(db_name, logo_path, company_name, phone, address, gst, footer):
-    conn = sqlite3.connect(db_name)
-    cursor = conn.cursor()
+# ─────────────────────────────────────────────────────────────
+#  GENERIC HELPERS
+# ─────────────────────────────────────────────────────────────
 
-    logo_data = None
-    if logo_path and os.path.exists(logo_path):
-        with open(logo_path, "rb") as f:
-            logo_data = f.read()   # ✅ ORIGINAL IMAGE STORED
-
-    cursor.execute("SELECT id FROM company_info WHERE id=1")
-    exists = cursor.fetchone()
-
-    if exists:
-        cursor.execute("""
-            UPDATE company_info
-            SET logo=?, company_name=?, phone=?, address=?, gst=?, footer=?
-            WHERE id=1
-        """, (logo_data, company_name, phone, address, gst, footer))
-    else:
-        cursor.execute("""
-            INSERT INTO company_info (id, logo, company_name, phone, address, gst, footer)
-            VALUES (1, ?, ?, ?, ?, ?, ?)
-        """, (logo_data, company_name, phone, address, gst, footer))
-
-    conn.commit()
-    conn.close()
-
-def load_company_info(db_name):
-    conn = sqlite3.connect(db_name)
-    cursor = conn.cursor()
-
-    cursor.execute("""
-        SELECT logo, company_name, phone, address, gst, footer
-        FROM company_info WHERE id=1
-    """)
-    row = cursor.fetchone()
-    conn.close()
-
-    if not row:
-        return {}
-
-    logo_blob = row[0]
-
-    pixmap = QPixmap()
-    pixmap = QPixmap()
-
-    if logo_blob:
-        # ✅ Case 1: OLD DATA (string path)
-        if isinstance(logo_blob, str):
-            if os.path.exists(logo_blob):
-                pixmap.load(logo_blob)
-
-        # ✅ Case 2: NEW DATA (BLOB)
-        elif isinstance(logo_blob, (bytes, bytearray)):
-            pixmap.loadFromData(logo_blob)
-
-    return {
-        "logo"         : pixmap,
-        "company_name" : row[1] or "",
-        "phone"        : row[2] or "",
-        "address"      : row[3] or "",
-        "gst"          : row[4] or "",
-        "footer"       : row[5] or ""
-    }
-# ──────────────────────────────────────────
-#  HELPERS
-# ──────────────────────────────────────────
-def generate_recovery_codes():
-    return [
-        ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
-        for _ in range(5)
-    ]
-
-def generate_qr(secret, username):
-    uri = pyotp.TOTP(secret).provisioning_uri(
-        name=username,
-        issuer_name="EvoAura"
-    )
-    img = qrcode.make(uri)
-    path = f"{username}_qr.png"
-    img.save(path)
-    return path
-
-# ──────────────────────────────────────────
-#  MASTER CODE
-# ──────────────────────────────────────────
-def verify_master_code(code):
+def verify_master_code(code: str) -> bool:
+    """Return True if *code* is a valid TOTP value for MASTER_SECRET."""
     return pyotp.TOTP(MASTER_SECRET).verify(code)
 
-# ──────────────────────────────────────────
-#  USER FUNCTIONS
-# ──────────────────────────────────────────
-def create_user(db_name, username, password, role="user"):
-    user_secret    = pyotp.random_base32()
-    recovery_codes = generate_recovery_codes()
-    qr_path        = generate_qr(user_secret, username)
 
-    conn   = sqlite3.connect(db_name)
-    cursor = conn.cursor()
+def verify_otp(secret: str, otp: str) -> bool:
+    """Return True if *otp* is a valid TOTP value for *secret*."""
+    return pyotp.TOTP(secret).verify(otp)
+
+
+def generate_recovery_codes(n: int = 5) -> list:
+    """Generate *n* random 8-character alphanumeric recovery codes."""
+    chars = string.ascii_uppercase + string.digits
+    return [''.join(random.choices(chars, k=8)) for _ in range(n)]
+
+
+def generate_qr(secret: str, username: str) -> str:
+    """
+    Build a TOTP provisioning URI and save the QR-code PNG.
+    Returns the saved file path ('<username>_qr.png').
+    """
+    uri = pyotp.TOTP(secret).provisioning_uri(name=username, issuer_name="EvoAura")
+    path = f"{username}_qr.png"
+    qrcode.make(uri).save(path)
+    return path
+
+
+def pixmap_from_blob(blob) -> QPixmap:
+    """
+    Convert a logo value from the DB into a QPixmap.
+    Handles both raw BLOB (bytes) and legacy file-path strings.
+    Returns an empty QPixmap on failure.
+    """
+    px = QPixmap()
+    if isinstance(blob, (bytes, bytearray)):
+        px.loadFromData(blob)
+    elif isinstance(blob, str) and os.path.exists(blob):
+        px.load(blob)
+    return px
+
+
+def px_scaled(pixmap: QPixmap, w: int, h: int) -> QPixmap:
+    """Scale *pixmap* to (w, h) keeping aspect ratio with smooth interpolation."""
+    return pixmap.scaled(w, h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+
+
+def alert(parent, title: str, msg: str, kind: str = "info"):
+    """
+    Show a themed QMessageBox.
+      kind='info'  -> QMessageBox.information
+      kind='warn'  -> QMessageBox.warning
+      kind='error' -> QMessageBox.critical
+    """
+    dispatch = {
+        "info" : QMessageBox.information,
+        "warn" : QMessageBox.warning,
+        "error": QMessageBox.critical,
+    }
+    dispatch.get(kind, QMessageBox.information)(parent, title, msg)
+
+
+# ─────────────────────────────────────────────────────────────
+#  DATABASE — USERS
+# ─────────────────────────────────────────────────────────────
+
+def init_db(db_name: str):
+    """
+    Create the *users* and *company_info* tables if they don't exist.
+    Safe to call repeatedly on an already-initialised database.
+    """
+    with sqlite3.connect(db_name) as conn:
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS users (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                username       TEXT UNIQUE,
+                password       TEXT,
+                role           TEXT,
+                otp_secret     TEXT,
+                recovery_codes TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS company_info (
+                id           INTEGER PRIMARY KEY,
+                logo         BLOB,
+                company_name TEXT,
+                phone        TEXT,
+                address      TEXT,
+                gst          TEXT,
+                footer       TEXT
+            );
+        """)
+
+
+def has_users(db_name: str) -> bool:
+    """Return True if at least one user row exists in *db_name*."""
+    with sqlite3.connect(db_name) as conn:
+        return conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] > 0
+
+
+def get_all_usernames(db_name: str) -> list:
+    """Return a sorted list of all usernames in *db_name*."""
+    with sqlite3.connect(db_name) as conn:
+        rows = conn.execute("SELECT username FROM users ORDER BY username").fetchall()
+    return [r[0] for r in rows]
+
+
+def create_user(db_name: str, username: str, password: str, role: str = "user") -> dict:
+    """
+    Insert a new user, generate their TOTP secret and recovery codes.
+    Returns {'success': True, 'secret', 'recovery_codes', 'qr_path'} on success,
+    or {'success': False, 'message'} on failure (e.g. duplicate username).
+    """
+    secret  = pyotp.random_base32()
+    codes   = generate_recovery_codes()
+    qr_path = generate_qr(secret, username)
+
     try:
-        cursor.execute(
-            "INSERT INTO users VALUES (NULL, ?, ?, ?, ?, ?)",
-            (username, password, role, user_secret, ",".join(recovery_codes))
-        )
-        conn.commit()
-        return {
-            "success"        : True,
-            "secret"         : user_secret,
-            "recovery_codes" : recovery_codes,
-            "qr_path"        : qr_path
-        }
-    except Exception:
+        with sqlite3.connect(db_name) as conn:
+            conn.execute(
+                "INSERT INTO users VALUES (NULL, ?, ?, ?, ?, ?)",
+                (username, password, role, secret, ",".join(codes))
+            )
+        return {"success": True, "secret": secret,
+                "recovery_codes": codes, "qr_path": qr_path}
+    except sqlite3.IntegrityError:
         return {"success": False, "message": "Username already exists"}
-    finally:
-        conn.close()
 
-def login_user(db_name, username, password):
-    conn   = sqlite3.connect(db_name)
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT password, otp_secret, role, recovery_codes FROM users WHERE username=?",
-        (username,)
-    )
-    data = cursor.fetchone()
-    conn.close()
 
-    if not data:
+def login_user(db_name: str, username: str, password: str) -> dict:
+    """
+    Validate username + password.
+    Returns {'success': True, 'secret', 'role', 'recovery_codes'} on success,
+    or {'success': False, 'message'} on failure.
+    """
+    with sqlite3.connect(db_name) as conn:
+        row = conn.execute(
+            "SELECT password, otp_secret, role, recovery_codes FROM users WHERE username=?",
+            (username,)
+        ).fetchone()
+
+    if not row:
         return {"success": False, "message": "User not found"}
 
-    db_pass, secret, role, recovery_codes = data
-
+    db_pass, secret, role, codes = row
     if password != db_pass:
         return {"success": False, "message": "Wrong password"}
 
     return {
-        "success"        : True,
-        "secret"         : secret,
-        "role"           : role,
-        "recovery_codes" : recovery_codes.split(",") if recovery_codes else []
+        "success"       : True,
+        "secret"        : secret,
+        "role"          : role,
+        "recovery_codes": codes.split(",") if codes else []
     }
 
-def verify_otp(secret, otp):
-    return pyotp.TOTP(secret).verify(otp)
 
-def get_all_usernames(db_name):
-    conn   = sqlite3.connect(db_name)
-    cursor = conn.cursor()
-    cursor.execute("SELECT username FROM users ORDER BY username")
-    rows = cursor.fetchall()
-    conn.close()
-    return [row[0] for row in rows]
+def get_user_otp_data(db_name: str, username: str):
+    """
+    Return (otp_secret, recovery_codes_list) for *username*.
+    Returns (None, []) if the user is not found.
+    Used by the dashboard user-security viewer.
+    """
+    with sqlite3.connect(db_name) as conn:
+        row = conn.execute(
+            "SELECT otp_secret, recovery_codes FROM users WHERE username=?",
+            (username,)
+        ).fetchone()
 
-# ──────────────────────────────────────────
+    if not row:
+        return None, []
+    secret, codes = row
+    return secret, (codes.split(",") if codes else [])
+
+
+# ─────────────────────────────────────────────────────────────
+#  DATABASE — COMPANY INFO
+# ─────────────────────────────────────────────────────────────
+
+def save_company_info(db_name: str, logo_path: str, company_name: str,
+                      phone: str, address: str, gst: str, footer: str):
+    """
+    Upsert the single company-info row (id=1).
+    *logo_path* is read from disk and stored as raw BLOB bytes.
+    Pass an empty string for *logo_path* to leave the logo column NULL.
+    """
+    logo_data = None
+    if logo_path and os.path.exists(logo_path):
+        with open(logo_path, "rb") as f:
+            logo_data = f.read()
+
+    with sqlite3.connect(db_name) as conn:
+        exists = conn.execute("SELECT id FROM company_info WHERE id=1").fetchone()
+        if exists:
+            conn.execute(
+                "UPDATE company_info SET logo=?,company_name=?,phone=?,address=?,gst=?,footer=? WHERE id=1",
+                (logo_data, company_name, phone, address, gst, footer)
+            )
+        else:
+            conn.execute(
+                "INSERT INTO company_info (id,logo,company_name,phone,address,gst,footer) VALUES (1,?,?,?,?,?,?)",
+                (logo_data, company_name, phone, address, gst, footer)
+            )
+
+
+def clear_company_logo(db_name: str):
+    """Set the stored logo to NULL without touching any other company fields."""
+    with sqlite3.connect(db_name) as conn:
+        conn.execute("UPDATE company_info SET logo=NULL WHERE id=1")
+
+
+def load_company_info(db_name: str) -> dict:
+    """
+    Load the company-info row from *db_name*.
+    Returns a dict with keys: logo (QPixmap), company_name, phone, address,
+    gst, footer.  Returns an empty dict if no row exists yet.
+    """
+    with sqlite3.connect(db_name) as conn:
+        row = conn.execute(
+            "SELECT logo,company_name,phone,address,gst,footer FROM company_info WHERE id=1"
+        ).fetchone()
+
+    if not row:
+        return {}
+
+    return {
+        "logo"        : pixmap_from_blob(row[0]),
+        "company_name": row[1] or "",
+        "phone"       : row[2] or "",
+        "address"     : row[3] or "",
+        "gst"         : row[4] or "",
+        "footer"      : row[5] or "",
+    }
+
+
+# ─────────────────────────────────────────────────────────────
 #  QR DISPLAY
-# ──────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────
+
 class QRDisplay(QWidget):
+    """
+    Shows the TOTP QR-code image, the raw secret key, and recovery codes.
+    The user scans the QR in Google Authenticator / Authy.
+    Provides a 'Copy Codes' button for convenience.
+    """
 
-    def __init__(self, secret, qr_path, recovery_codes):
+    def __init__(self, secret: str, qr_path: str, recovery_codes: list):
         super().__init__()
-
-        self.secret = secret
         self.recovery_codes = recovery_codes
 
         self.setWindowTitle("Setup 2FA")
@@ -237,22 +292,19 @@ class QRDisplay(QWidget):
         layout.setContentsMargins(25, 20, 25, 20)
         layout.setSpacing(12)
 
-        # ── TITLE ──
+        # Title
         title = QLabel("📱  Scan QR in Authenticator App")
         title.setAlignment(Qt.AlignCenter)
         title.setStyleSheet("font-size: 14px; font-weight: bold; color: #1a7fe8;")
         layout.addWidget(title)
 
-        # ── QR IMAGE ──
+        # QR code image
         qr_label = QLabel()
-        pixmap = QPixmap(qr_path).scaled(
-            200, 200, Qt.KeepAspectRatio, Qt.SmoothTransformation
-        )
-        qr_label.setPixmap(pixmap)
+        qr_label.setPixmap(px_scaled(QPixmap(qr_path), 200, 200))
         qr_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(qr_label)
 
-        # ── SECRET ──
+        # Secret key display
         lbl_s = QLabel(f"🔑  Secret Key:\n{secret}")
         lbl_s.setWordWrap(True)
         lbl_s.setStyleSheet(
@@ -260,7 +312,7 @@ class QRDisplay(QWidget):
         )
         layout.addWidget(lbl_s)
 
-        # ── RECOVERY CODES ──
+        # Recovery codes display
         self.lbl_r = QLabel(
             "🛡  Recovery Codes (save these!):\n" + "\n".join(recovery_codes)
         )
@@ -270,13 +322,13 @@ class QRDisplay(QWidget):
         )
         layout.addWidget(self.lbl_r)
 
-        # ── BUTTON ROW ──
+        # Buttons row
         btn_row = QHBoxLayout()
 
         copy_btn = QPushButton("📋 Copy Codes")
         copy_btn.setCursor(Qt.PointingHandCursor)
         copy_btn.setMinimumHeight(34)
-        copy_btn.clicked.connect(self.copy_codes)
+        copy_btn.clicked.connect(self._copy_codes)
 
         done_btn = QPushButton("✅ Done")
         done_btn.setMinimumHeight(34)
@@ -284,29 +336,25 @@ class QRDisplay(QWidget):
 
         btn_row.addWidget(copy_btn)
         btn_row.addWidget(done_btn)
-
         layout.addLayout(btn_row)
 
         self.setLayout(layout)
 
-    # ─────────────────────────────
-    # COPY TO CLIPBOARD
-    # ─────────────────────────────
-    def copy_codes(self):
-        clipboard = QApplication.clipboard()
-        text = "\n".join(self.recovery_codes)
-        clipboard.setText(text)
+    def _copy_codes(self):
+        """Copy all recovery codes to the system clipboard."""
+        QApplication.clipboard().setText("\n".join(self.recovery_codes))
+        alert(self, "Copied", "Recovery codes copied to clipboard ✅")
 
-        QMessageBox.information(
-            self,
-            "Copied",
-            "Recovery codes copied to clipboard ✅"
-        )
 
-# ──────────────────────────────────────────
-#  STEP 1 — ASK DB NAME
-# ──────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────
+#  STEP 1 — ASK DB / COMPANY NAME  (first-run wizard)
+# ─────────────────────────────────────────────────────────────
+
 class AskDBName(QWidget):
+    """
+    First-run wizard step 1: asks for a company name that becomes the DB filename.
+    Prevents overwriting an existing database.
+    """
 
     def __init__(self):
         super().__init__()
@@ -330,50 +378,53 @@ class AskDBName(QWidget):
         self.db_input = QLineEdit()
         self.db_input.setPlaceholderText("e.g.  my_shop   (no spaces needed)")
         self.db_input.setMinimumHeight(36)
-        self.db_input.returnPressed.connect(self.go_next)
+        self.db_input.returnPressed.connect(self._go_next)
         layout.addWidget(self.db_input)
 
         btn = QPushButton("Next  →")
         btn.setMinimumHeight(38)
-        btn.clicked.connect(self.go_next)
+        btn.clicked.connect(self._go_next)
         layout.addWidget(btn)
 
         self.setLayout(layout)
 
-    def go_next(self):
-        name = self.db_input.text().strip()
-
+    def _go_next(self):
+        """Sanitise the entered name and open master-code verification."""
+        name = self.db_input.text().strip().replace(" ", "_")
         if not name:
-            QMessageBox.warning(self, "Error", "Please enter a Company name.")
+            alert(self, "Error", "Please enter a Company name.", "warn")
             return
 
-        name = name.replace(" ", "_")
         if not name.endswith(".db"):
             name += ".db"
 
         if os.path.exists(name):
-            QMessageBox.warning(
-                self, "Already Exists",
-                f"'{name}' already exists.\nPlease choose a different name."
-            )
+            alert(self, "Already Exists",
+                  f"'{name}' already exists.\nPlease choose a different name.", "warn")
             return
 
         self.auth = StartupAuth(name)
         self.auth.show()
         self.close()
 
-# ──────────────────────────────────────────
-#  STEP 2 — MASTER CODE VERIFICATION
-# ──────────────────────────────────────────
-class StartupAuth(QWidget):
 
-    def __init__(self, db_name):
+# ─────────────────────────────────────────────────────────────
+#  STEP 2 — MASTER CODE VERIFICATION  (first-run wizard)
+# ─────────────────────────────────────────────────────────────
+
+class StartupAuth(QWidget):
+    """
+    First-run wizard step 2: verifies the TOTP master code before
+    creating a new database.  On success initialises the DB, saves
+    a default company name, then opens CompanySettings -> SignupForm.
+    """
+
+    def __init__(self, db_name: str):
         super().__init__()
         self.db_name = db_name
 
         self.setWindowTitle("Security Verification")
         self.setFixedSize(420, 240)
-        
 
         layout = QVBoxLayout()
         layout.setContentsMargins(40, 30, 40, 30)
@@ -394,50 +445,57 @@ class StartupAuth(QWidget):
         self.otp_input.setPlaceholderText("Enter 6-digit TOTP code")
         self.otp_input.setEchoMode(QLineEdit.Password)
         self.otp_input.setMinimumHeight(36)
-        self.otp_input.returnPressed.connect(self.verify)
+        self.otp_input.returnPressed.connect(self._verify)
         layout.addWidget(self.otp_input)
 
         btn = QPushButton("Verify & Create Database")
         btn.setMinimumHeight(38)
-        btn.clicked.connect(self.verify)
+        btn.clicked.connect(self._verify)
         layout.addWidget(btn)
 
         self.setLayout(layout)
 
-    def verify(self):
+    def _verify(self):
+        """Check master code -> create DB -> open company settings."""
         code = self.otp_input.text().strip()
-
         if not verify_master_code(code):
-            QMessageBox.warning(self, "Error", "Invalid Master Code ❌\nPlease try again.")
+            alert(self, "Error", "Invalid Master Code ❌\nPlease try again.", "warn")
             self.otp_input.clear()
             return
 
         init_db(self.db_name)
 
-        # Save company name as default in DB
-        company_display_name = self.db_name.replace(".db", "").replace("_", " ").title()
-        save_company_info(self.db_name, "", company_display_name, "", "", "", "")
+        # Derive a human-readable default company name from the filename
+        default_name = self.db_name.replace(".db", "").replace("_", " ").title()
+        save_company_info(self.db_name, "", default_name, "", "", "", "")
 
-        QMessageBox.information(
-            self, "Database Created",
-            f"✅  '{self.db_name}' created successfully!\nNow create the first user."
-        )
+        alert(self, "Database Created",
+              f"✅  '{self.db_name}' created successfully!\nNow create the first user.")
 
+        # Open company settings; when closed, open signup automatically
         self.company_form = CompanySettings(self.db_name)
-        self.company_form.show()
         self.company_form.destroyed.connect(self._open_signup)
+        self.company_form.show()
         self.close()
+
     def _open_signup(self):
-            self.signup = SignupForm(self.db_name)
-            self.signup.show()
-    
+        """Called automatically after CompanySettings window is closed."""
+        self.signup = SignupForm(self.db_name)
+        self.signup.show()
 
-# ──────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────
 #  SIGNUP
-# ──────────────────────────────────────────
-class SignupForm(QWidget):
+# ─────────────────────────────────────────────────────────────
 
-    def __init__(self, db_name):
+class SignupForm(QWidget):
+    """
+    Creates a new user account (username + password + TOTP 2FA).
+    Requires the master TOTP code to authorise account creation.
+    On success shows the QR / recovery-code screen, then opens LoginForm.
+    """
+
+    def __init__(self, db_name: str):
         super().__init__()
         self.db_name = db_name
 
@@ -473,7 +531,7 @@ class SignupForm(QWidget):
         self.confirm_password.setMinimumHeight(34)
 
         self.show_pass = QCheckBox("Show Password")
-        self.show_pass.stateChanged.connect(self.toggle_password)
+        self.show_pass.stateChanged.connect(self._toggle_password)
 
         self.master = QLineEdit()
         self.master.setPlaceholderText("6-digit TOTP code")
@@ -494,60 +552,65 @@ class SignupForm(QWidget):
 
         btn = QPushButton("Create User")
         btn.setMinimumHeight(38)
-        btn.clicked.connect(self.create)
+        btn.clicked.connect(self._create)
         layout.addWidget(btn)
 
         self.setLayout(layout)
 
-    def toggle_password(self, state):
+    def _toggle_password(self, state: int):
+        """Toggle plain / hidden text for both password fields simultaneously."""
         mode = QLineEdit.Normal if state else QLineEdit.Password
         self.password.setEchoMode(mode)
         self.confirm_password.setEchoMode(mode)
 
-    def create(self):
+    def _create(self):
+        """Validate all inputs, create the user, show QR on success."""
         u = self.username.text().strip()
         p = self.password.text().strip()
         c = self.confirm_password.text().strip()
         m = self.master.text().strip()
 
-        if not u or not p or not c or not m:
-            QMessageBox.warning(self, "Error", "Please fill all fields.")
+        if not all([u, p, c, m]):
+            alert(self, "Error", "Please fill all fields.", "warn")
             return
-
         if p != c:
-            QMessageBox.warning(self, "Error", "Passwords do not match ❌")
+            alert(self, "Error", "Passwords do not match ❌", "warn")
             return
-
         if not verify_master_code(m):
-            QMessageBox.warning(self, "Error", "Invalid Setup Code ❌")
+            alert(self, "Error", "Invalid Setup Code ❌", "warn")
             return
 
         result = create_user(self.db_name, u, p)
+        if not result["success"]:
+            alert(self, "Error", result["message"], "warn")
+            return
 
-        if result["success"]:
-            self.qr = QRDisplay(result["secret"], result["qr_path"], result["recovery_codes"])
-            self.login_window = LoginForm(self.db_name)
-            self.login_window  # keep reference alive
-            db = self.db_name
+        db = self.db_name
 
-            def open_login():
-                from PyQt5.QtWidgets import QApplication
-                win = LoginForm(db)
-                win.show()
-                QApplication.instance()._login_ref = win  # prevent GC
+        def _open_login():
+            """Open LoginForm after the QR window is closed."""
+            win = LoginForm(db)
+            win.show()
+            # Keep reference on the app object to prevent garbage collection
+            QApplication.instance()._login_ref = win
 
-            self.qr.destroyed.connect(open_login)
-            self.qr.show()
-            self.close()
-        else:
-            QMessageBox.warning(self, "Error", result["message"])
+        self.qr = QRDisplay(result["secret"], result["qr_path"], result["recovery_codes"])
+        self.qr.destroyed.connect(_open_login)
+        self.qr.show()
+        self.close()
 
-# ──────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────
 #  LOGIN
-# ──────────────────────────────────────────
-class LoginForm(QWidget):
+# ─────────────────────────────────────────────────────────────
 
-    def __init__(self, db_name):
+class LoginForm(QWidget):
+    """
+    Standard login screen: username dropdown + password -> OTP / recovery-code check.
+    Offers a 'New User' button that opens SignupForm without closing the login window.
+    """
+
+    def __init__(self, db_name: str):
         super().__init__()
         self.db_name = db_name
 
@@ -573,19 +636,18 @@ class LoginForm(QWidget):
         self.username.setInsertPolicy(QComboBox.NoInsert)
         self.username.setPlaceholderText("Select username")
         self.username.setMinimumHeight(34)
-        self.load_usernames()
+        self._load_usernames()
 
         self.password = QLineEdit()
         self.password.setPlaceholderText("Enter password")
         self.password.setEchoMode(QLineEdit.Password)
         self.password.setMinimumHeight(34)
-        self.password.returnPressed.connect(self.login)
+        self.password.returnPressed.connect(self._login)
 
         grid.addWidget(QLabel("Username"), 0, 0)
         grid.addWidget(self.username,       0, 1)
         grid.addWidget(QLabel("Password"), 1, 0)
         grid.addWidget(self.password,       1, 1)
-
         layout.addLayout(grid)
 
         btn_row = QHBoxLayout()
@@ -593,11 +655,11 @@ class LoginForm(QWidget):
 
         btn_login = QPushButton("Login")
         btn_login.setMinimumHeight(38)
-        btn_login.clicked.connect(self.login)
+        btn_login.clicked.connect(self._login)
 
         btn_signup = QPushButton("New User")
         btn_signup.setMinimumHeight(38)
-        btn_signup.clicked.connect(self.open_signup)
+        btn_signup.clicked.connect(self._open_signup)
 
         btn_row.addWidget(btn_login)
         btn_row.addWidget(btn_signup)
@@ -605,64 +667,63 @@ class LoginForm(QWidget):
 
         self.setLayout(layout)
 
-    def load_usernames(self):
+    def _load_usernames(self):
+        """Refresh the username dropdown from the database."""
         self.username.clear()
         for name in get_all_usernames(self.db_name):
             self.username.addItem(name)
         self.username.setCurrentIndex(-1)
 
-    def login(self):
+    def _login(self):
+        """Verify password then prompt for OTP / recovery code."""
         u = self.username.currentText().strip()
         p = self.password.text().strip()
 
         if not u or not p:
-            QMessageBox.warning(self, "Error", "Please enter username and password.")
+            alert(self, "Error", "Please enter username and password.", "warn")
             return
 
         result = login_user(self.db_name, u, p)
-
         if not result["success"]:
-            QMessageBox.warning(self, "Login Failed", result["message"])
+            alert(self, "Login Failed", result["message"], "warn")
             return
 
         otp, ok = QInputDialog.getText(
             self, "2FA Verification", "Enter OTP or Recovery Code:"
         )
-
         if not ok:
             return
 
-        if verify_otp(result["secret"], otp):
-            QMessageBox.information(self, "Success", "Login Successful ✅")
+        if verify_otp(result["secret"], otp) or otp in result["recovery_codes"]:
+            alert(self, "Success", "Login Successful ✅")
             self.dashboard = Dashboard(self.db_name, u)
             self.dashboard.show()
             self.close()
-            return
+        else:
+            alert(self, "Error", "Invalid OTP / Recovery Code ❌", "warn")
 
-        if otp in result["recovery_codes"]:
-            QMessageBox.information(self, "Success", "Login via Recovery Code ✅")
-            self.dashboard = Dashboard(self.db_name, u)
-            self.dashboard.show()
-            self.close()
-            return
-
-        QMessageBox.warning(self, "Error", "Invalid OTP / Recovery Code ❌")
-
-    def open_signup(self):
+    def _open_signup(self):
+        """Open signup form; reload usernames when it is closed."""
         self.signup = SignupForm(self.db_name)
+        self.signup.destroyed.connect(self._load_usernames)
         self.signup.show()
-        self.signup.destroyed.connect(self.load_usernames)
 
-# ──────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────
 #  COMPANY SETTINGS
-# ──────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────
 
 class CompanySettings(QWidget):
+    """
+    Editor for company branding: logo (upload/remove), company name, phone,
+    address, GST number, and invoice footer text.
+    Settings are persisted to the *company_info* table.
+    """
 
-    def __init__(self, db_name):
+    def __init__(self, db_name: str):
         super().__init__()
-        self.db_name = db_name
-        self.logo_path = ""
+        self.db_name   = db_name
+        self.logo_path = ""     # tracks path of a newly chosen logo file
 
         self.setWindowTitle("Company Settings")
         self.setFixedSize(450, 580)
@@ -671,15 +732,13 @@ class CompanySettings(QWidget):
         layout.setContentsMargins(35, 25, 35, 25)
         layout.setSpacing(14)
 
-        # --- TITLE ---
+        # Title
         title = QLabel("🏢  Company Settings")
         title.setAlignment(Qt.AlignCenter)
-        title.setStyleSheet(
-            "font-size: 16px; font-weight: bold; color: #1a7fe8;"
-        )
+        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #1a7fe8;")
         layout.addWidget(title)
 
-        # --- LOGO SECTION ---
+        # ── LOGO SECTION ──────────────────────────────────────
         self.logo_label = QLabel()
         self.logo_label.setFixedSize(90, 90)
         self.logo_label.setAlignment(Qt.AlignCenter)
@@ -690,35 +749,26 @@ class CompanySettings(QWidget):
 
         upload_btn = QPushButton("Upload Logo")
         upload_btn.setFixedHeight(30)
-        upload_btn.clicked.connect(self.upload_logo)
+        upload_btn.clicked.connect(self._upload_logo)
 
         remove_btn = QPushButton("Remove Logo")
         remove_btn.setFixedHeight(30)
-        remove_btn.setStyleSheet(
-            "background-color:#ff4d4d; color:white;"
-        )
-        remove_btn.clicked.connect(self.remove_logo)
-
-        logo_row = QHBoxLayout()
-        logo_row.addStretch()
-        logo_row.addWidget(self.logo_label)
-        logo_row.addSpacing(12)
+        remove_btn.setStyleSheet("background-color:#ff4d4d; color:white;")
+        remove_btn.clicked.connect(self._remove_logo)
 
         btn_col = QVBoxLayout()
         btn_col.addWidget(upload_btn)
         btn_col.addWidget(remove_btn)
 
+        logo_row = QHBoxLayout()
+        logo_row.addStretch()
+        logo_row.addWidget(self.logo_label)
+        logo_row.addSpacing(12)
         logo_row.addLayout(btn_col)
         logo_row.addStretch()
-
         layout.addLayout(logo_row)
 
-        # --- FORM FIELDS ---
-        grid = QGridLayout()
-        grid.setSpacing(10)
-        grid.setColumnMinimumWidth(0, 120)
-        grid.setColumnMinimumWidth(1, 230)
-
+        # ── FORM FIELDS ───────────────────────────────────────
         self.company_name = QLineEdit()
         self.company_name.setPlaceholderText("Company name")
         self.company_name.setMinimumHeight(34)
@@ -740,83 +790,66 @@ class CompanySettings(QWidget):
         self.footer.setMinimumHeight(90)
         self.footer.setMaximumHeight(110)
 
+        grid = QGridLayout()
+        grid.setSpacing(10)
+        grid.setColumnMinimumWidth(0, 120)
+        grid.setColumnMinimumWidth(1, 230)
+
         grid.addWidget(QLabel("Company Name"), 0, 0)
-        grid.addWidget(self.company_name, 0, 1)
-
-        grid.addWidget(QLabel("Phone"), 1, 0)
-        grid.addWidget(self.phone, 1, 1)
-
-        grid.addWidget(QLabel("Address"), 2, 0)
-        grid.addWidget(self.address, 2, 1)
-
-        grid.addWidget(QLabel("GST No"), 3, 0)
-        grid.addWidget(self.gst, 3, 1)
-
-        grid.addWidget(QLabel("Footer"), 4, 0)
-        grid.addWidget(self.footer, 4, 1)
+        grid.addWidget(self.company_name,       0, 1)
+        grid.addWidget(QLabel("Phone"),        1, 0)
+        grid.addWidget(self.phone,              1, 1)
+        grid.addWidget(QLabel("Address"),      2, 0)
+        grid.addWidget(self.address,            2, 1)
+        grid.addWidget(QLabel("GST No"),       3, 0)
+        grid.addWidget(self.gst,               3, 1)
+        grid.addWidget(QLabel("Footer"),       4, 0)
+        grid.addWidget(self.footer,            4, 1)
 
         layout.addLayout(grid)
 
-        # --- SAVE BUTTON ---
         save_btn = QPushButton("Save Settings")
         save_btn.setMinimumHeight(38)
-        save_btn.clicked.connect(self.save_settings)
+        save_btn.clicked.connect(self._save)
         layout.addWidget(save_btn)
 
         self.setLayout(layout)
+        self._load()
 
-        self.load_settings()
+    # ── LOGO ACTIONS ─────────────────────────────────────────
 
-    # ---------------- UPLOAD LOGO ----------------
-    def upload_logo(self):
+    def _upload_logo(self):
+        """Open a file dialog to select a logo image and preview it."""
         path, _ = QFileDialog.getOpenFileName(
-            self, "Select Logo", "",
-            "Images (*.png *.jpg *.jpeg *.bmp)"
+            self, "Select Logo", "", "Images (*.png *.jpg *.jpeg *.bmp)"
         )
         if path:
             self.logo_path = path
-
-            pixmap = QPixmap(path)
-            if not pixmap.isNull():
-                self.logo_label.setPixmap(
-                    pixmap.scaled(
-                        90, 90,
-                        Qt.KeepAspectRatio,
-                        Qt.SmoothTransformation
-                    )
-                )
+            px = QPixmap(path)
+            if not px.isNull():
+                self.logo_label.setPixmap(px_scaled(px, 90, 90))
                 self.logo_label.setText("")
 
-    # ---------------- REMOVE LOGO ----------------
-    def remove_logo(self):
+    def _remove_logo(self):
+        """Clear the logo from the preview and the database after confirmation."""
         reply = QMessageBox.question(
-            self,
-            "Remove Logo",
+            self, "Remove Logo",
             "Are you sure you want to remove the logo?",
             QMessageBox.Yes | QMessageBox.No
         )
-
         if reply == QMessageBox.No:
             return
 
-        # clear UI
         self.logo_label.clear()
         self.logo_label.setText("No Logo")
         self.logo_path = ""
+        clear_company_logo(self.db_name)   # BUG FIX: was querying wrong table 'company'
+        alert(self, "Done", "Logo removed successfully")
 
-        # update DB
-        conn = sqlite3.connect(self.db_name)
-        cursor = conn.cursor()
-        cursor.execute("UPDATE company SET logo=''")
-        conn.commit()
-        conn.close()
+    # ── SAVE / LOAD ──────────────────────────────────────────
 
-        QMessageBox.information(
-            self, "Done", "Logo removed successfully"
-        )
-
-    # ---------------- SAVE ----------------
-    def save_settings(self):
+    def _save(self):
+        """Persist all company fields to the database, then close the window."""
         try:
             save_company_info(
                 self.db_name,
@@ -827,29 +860,18 @@ class CompanySettings(QWidget):
                 self.gst.text().strip(),
                 self.footer.toPlainText().strip()
             )
-
-            # ✅ success message
-            QMessageBox.information(self, "Success", "Company settings saved successfully!")
-
-            # ✅ close the window
-            self.close()   # use self.accept() if QDialog
-
+            alert(self, "Success", "Company settings saved successfully!")
+            self.close()
+            # BUG FIX: removed the stray second QMessageBox that always fired
         except Exception as e:
-            QMessageBox.critical(self, "Error", str(e))
-            QMessageBox.information(
-                self, "Saved", "✅ Settings saved successfully!"
-            )
+            alert(self, "Error", str(e), "error")
 
-    # ---------------- LOAD ----------------
-    def load_settings(self):
+    def _load(self):
+        """Populate all fields from the database (falls back to filename-derived default)."""
         data = load_company_info(self.db_name)
-
         if not data:
-            default_name = self.db_name.replace(
-                ".db", ""
-            ).replace("_", " ").title()
-
-            self.company_name.setText(default_name)
+            default = self.db_name.replace(".db", "").replace("_", " ").title()
+            self.company_name.setText(default)
             return
 
         self.company_name.setText(data.get("company_name", ""))
@@ -859,36 +881,34 @@ class CompanySettings(QWidget):
         self.footer.setPlainText(data.get("footer", ""))
 
         logo = data.get("logo")
-
-        # FIXED: load from path correctly
-        if logo:
-            pixmap = QPixmap(logo)
-            if not pixmap.isNull():
-                self.logo_label.setPixmap(
-                    pixmap.scaled(
-                        90, 90,
-                        Qt.KeepAspectRatio,
-                        Qt.SmoothTransformation
-                    )
-                )
-                self.logo_label.setText("")
-            else:
-                self.logo_label.setText("No Logo")
+        # BUG FIX: logo is already a QPixmap (returned by load_company_info).
+        # The original code called QPixmap(logo) on it which would fail silently.
+        if logo and not logo.isNull():
+            self.logo_label.setPixmap(px_scaled(logo, 90, 90))
+            self.logo_label.setText("")
         else:
             self.logo_label.setText("No Logo")
-# ──────────────────────────────────────────
+
+
+# ─────────────────────────────────────────────────────────────
 #  DASHBOARD
-# ──────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────
 
 class Dashboard(QWidget):
+    """
+    Main application dashboard shown after a successful login.
+    Top bar: app branding, user OTP-security viewer, settings, logout.
+    Card: company welcome banner + module navigation buttons.
+    """
 
-    def __init__(self, db_name, username="User"):
+    def __init__(self, db_name: str, username: str = "User"):
         super().__init__()
-        self.db_name = db_name
+        self.db_name  = db_name
+        self.username = username
 
-        company = load_company_info(self.db_name)
+        company      = load_company_info(db_name)
         company_name = company.get("company_name", "Your Company")
-        logo_pixmap = company.get("logo")
+        logo_pixmap  = company.get("logo")
 
         self.setWindowTitle("Evo Aura Billing")
         self.showMaximized()
@@ -898,7 +918,15 @@ class Dashboard(QWidget):
         main_layout.setContentsMargins(20, 15, 20, 15)
         main_layout.setSpacing(15)
 
-        # ── TOP BAR ──
+        main_layout.addWidget(self._build_topbar())
+        main_layout.addWidget(self._build_card(company_name, logo_pixmap))
+
+        self.setLayout(main_layout)
+
+    # ── TOP BAR ──────────────────────────────────────────────
+
+    def _build_topbar(self) -> QFrame:
+        """Construct the white top navigation bar with branding and action buttons."""
         top_frame = QFrame()
         top_frame.setFixedHeight(70)
         top_frame.setStyleSheet("background: white; border-radius: 10px;")
@@ -906,13 +934,12 @@ class Dashboard(QWidget):
         top_layout = QHBoxLayout(top_frame)
         top_layout.setContentsMargins(20, 5, 20, 5)
 
+        # App logo icon (optional file)
         logo = QLabel()
         logo.setFixedSize(40, 40)
         pixmap = QPixmap("icon/auralogo.png")
         if not pixmap.isNull():
-            logo.setPixmap(
-                pixmap.scaled(logo.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            )
+            logo.setPixmap(px_scaled(pixmap, 40, 40))
 
         app_name = QLabel("Evo Aura")
         app_name.setFont(QFont("Segoe UI", 14, QFont.Bold))
@@ -922,8 +949,8 @@ class Dashboard(QWidget):
         dash_title.setFont(QFont("Segoe UI", 16, QFont.Bold))
         dash_title.setAlignment(Qt.AlignCenter)
 
-        # 👨🏻‍💼 USER BUTTON
-        user_btn = QPushButton(f"👨🏻‍💼  {username}")
+        # Clicking username opens OTP-verified QR/security viewer
+        user_btn = QPushButton(f"👨🏻‍💼  {self.username}")
         user_btn.setCursor(Qt.PointingHandCursor)
         user_btn.setStyleSheet("""
             QPushButton {
@@ -937,7 +964,7 @@ class Dashboard(QWidget):
                 border-radius: 6px;
             }
         """)
-        user_btn.clicked.connect(lambda: self.open_user_security(username))
+        user_btn.clicked.connect(lambda: self._open_user_security(self.username))
 
         settings_btn = QPushButton("⚙️ Settings")
         settings_btn.setCursor(Qt.PointingHandCursor)
@@ -953,7 +980,7 @@ class Dashboard(QWidget):
             }
             QPushButton:hover { background-color: #ddeeff; }
         """)
-        settings_btn.clicked.connect(self.open_settings)
+        settings_btn.clicked.connect(self._open_settings)
 
         logout_btn = QPushButton("Logout")
         logout_btn.setCursor(Qt.PointingHandCursor)
@@ -980,22 +1007,20 @@ class Dashboard(QWidget):
         top_layout.addWidget(settings_btn)
         top_layout.addWidget(logout_btn)
 
-        main_layout.addWidget(top_frame)
-        #-------------------------------------------------------
-        #                     ── MAIN CARD ──
-        #------------------------------------------------------
+        return top_frame
+
+    # ── MAIN CARD ────────────────────────────────────────────
+
+    def _build_card(self, company_name: str, logo_pixmap) -> QFrame:
+        """Build the white content card: welcome banner + module navigation grid."""
         card = QFrame()
-        card.setStyleSheet("""
-            background: white;
-            border-radius: 14px;
-        """)
+        card.setStyleSheet("background: white; border-radius: 14px;")
 
         card_layout = QVBoxLayout()
         card_layout.setContentsMargins(50, 30, 50, 30)
         card_layout.setSpacing(20)
 
-            
-        # ── WELCOME SECTION    IMAGE ──
+        # Welcome banner — logo beside company name when logo is available
         if logo_pixmap and not logo_pixmap.isNull():
             container = QWidget()
             layout = QHBoxLayout(container)
@@ -1004,19 +1029,11 @@ class Dashboard(QWidget):
 
             img_label = QLabel()
             img_label.setFixedSize(200, 200)
-
-            img_label.setPixmap(
-                logo_pixmap.scaled(
-                    img_label.size(),
-                    Qt.KeepAspectRatio,
-                    Qt.SmoothTransformation
-                )
-            )
+            img_label.setPixmap(px_scaled(logo_pixmap, 200, 200))
 
             welcome = QLabel(f"Welcome, {company_name}")
             welcome.setFont(QFont("Segoe UI", 26, QFont.Bold))
 
-            # ✅ Proper LEFT → RIGHT layout
             layout.addStretch()
             layout.addWidget(img_label)
             layout.addWidget(welcome)
@@ -1024,120 +1041,104 @@ class Dashboard(QWidget):
 
             container.setStyleSheet("background-color: #eef5ff;")
             card_layout.addWidget(container)
-
         else:
             welcome = QLabel(f"Welcome, {company_name}")
             welcome.setAlignment(Qt.AlignCenter)
             welcome.setFont(QFont("Segoe UI", 26, QFont.Bold))
             welcome.setStyleSheet("background-color: #eef5ff;")
-
             card_layout.addWidget(welcome)
 
-        # ── GRID BUTTONS ──
+        # Module navigation grid
         grid = QGridLayout()
         grid.setSpacing(20)
 
-        def make_card_btn(text, action):
-            btn = QPushButton(text)
-            btn.setMinimumHeight(110)
-            btn.setStyleSheet("""
-                QPushButton {
-                    background-color : #ffffff;
-                    border           : 1px solid #d6e4f0;
-                    border-radius    : 12px;
-                    font-size        : 17px;
-                    font-weight      : 600;
-                    padding          : 15px;
-                }
-                QPushButton:hover {
-                    background-color : #f0f7ff;
-                    border           : 1px solid #4da3ff;
-                }
-            """)
-            btn.clicked.connect(lambda: self.coming_soon(action))
-            return btn
-
-        grid.addWidget(make_card_btn("✚   Add Product", "Add Product"), 0, 0)
-        grid.addWidget(make_card_btn("🏷️   Sale", "Sale"), 0, 1)
-        grid.addWidget(make_card_btn("🔁   Return", "Return"), 1, 0)
-        grid.addWidget(make_card_btn("🧾   Bill Views", "Bill View"), 1, 1)
-        grid.addWidget(make_card_btn("📊   Report Insights", "Report"), 2, 0, 1, 2)
+        grid.addWidget(self._make_card_btn("✚   Add Product",    "Add Product"), 0, 0)
+        grid.addWidget(self._make_card_btn("🏷️   Sale",           "Sale"),        0, 1)
+        grid.addWidget(self._make_card_btn("🔁   Return",         "Return"),      1, 0)
+        grid.addWidget(self._make_card_btn("🧾   Bill Views",     "Bill View"),   1, 1)
+        grid.addWidget(self._make_card_btn("📊   Report Insights","Report"),      2, 0, 1, 2)
 
         card_layout.addLayout(grid)
         card.setLayout(card_layout)
-        main_layout.addWidget(card)
+        return card
 
-        self.setLayout(main_layout)
+    def _make_card_btn(self, text: str, action: str) -> QPushButton:
+        """Return a single styled module-navigation card button."""
+        btn = QPushButton(text)
+        btn.setMinimumHeight(110)
+        btn.setStyleSheet("""
+            QPushButton {
+                background-color : #ffffff;
+                border           : 1px solid #d6e4f0;
+                border-radius    : 12px;
+                font-size        : 17px;
+                font-weight      : 600;
+                padding          : 15px;
+            }
+            QPushButton:hover {
+                background-color : #f0f7ff;
+                border           : 1px solid #4da3ff;
+            }
+        """)
+        btn.clicked.connect(lambda: self._coming_soon(action))
+        return btn
 
-    # 🔐 USER SECURITY
-    def open_user_security(self, username):
+    # ── ACTIONS ──────────────────────────────────────────────
+
+    def _open_user_security(self, username: str):
+        """
+        Show the user's own QR / recovery codes after OTP verification.
+        Protects access so only the account holder can view their credentials.
+        """
         otp, ok = QInputDialog.getText(
-            self,
-            "Verify Identity",
-            "Enter your 6-digit OTP:",
-            QLineEdit.Normal
+            self, "Verify Identity", "Enter your 6-digit OTP:", QLineEdit.Normal
         )
-
         if not ok or not otp:
             return
 
         if len(otp) != 6 or not otp.isdigit():
-            QMessageBox.warning(self, "Error", "Enter valid 6-digit code")
+            alert(self, "Error", "Enter valid 6-digit code", "warn")
             return
 
-        conn = sqlite3.connect(self.db_name)
-        cursor = conn.cursor()
-
-        cursor.execute("""
-            SELECT otp_secret, recovery_codes
-            FROM users
-            WHERE username=?
-        """, (username,))
-
-        data = cursor.fetchone()
-        conn.close()
-
-        if not data:
-            QMessageBox.warning(self, "Error", "User not found")
+        secret, codes = get_user_otp_data(self.db_name, username)
+        if not secret:
+            alert(self, "Error", "User not found", "warn")
             return
-
-        secret, recovery_codes = data
-        recovery_codes = recovery_codes.split(",") if recovery_codes else []
 
         if not verify_otp(secret, otp):
-            QMessageBox.warning(self, "Error", "Invalid OTP ❌")
+            alert(self, "Error", "Invalid OTP ❌", "warn")
             return
 
         qr_path = generate_qr(secret, username)
-
-        self.qr_view = QRDisplay(secret, qr_path, recovery_codes)
+        self.qr_view = QRDisplay(secret, qr_path, codes)
         self.qr_view.show()
 
-    # ⚙️ SETTINGS
-    def open_settings(self):
+    def _open_settings(self):
+        """Open the CompanySettings editor window."""
         self.settings_win = CompanySettings(self.db_name)
         self.settings_win.show()
 
-    # 🚀 COMING SOON
-    def coming_soon(self, page):
-        QMessageBox.information(self, page, f"{page} — Coming Soon 🚀")
+    def _coming_soon(self, page: str):
+        """Placeholder shown for modules that are not yet implemented."""
+        alert(self, page, f"{page} — Coming Soon 🚀")
 
-# ──────────────────────────────────────────
-#  MAIN ENTRY
-# ──────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────
+#  ENTRY POINT
+# ─────────────────────────────────────────────────────────────
+
 if __name__ == "__main__":
     app = QApplication(sys.argv)
 
     db_files = glob.glob("*.db")
 
     if db_files:
+        # Use the first database found in the working directory
         db_name = db_files[0]
         init_db(db_name)
-        if has_users(db_name):
-            window = LoginForm(db_name)
-        else:
-            window = SignupForm(db_name)
+        window = LoginForm(db_name) if has_users(db_name) else SignupForm(db_name)
     else:
+        # No database yet — run the first-time setup wizard
         window = AskDBName()
 
     window.show()
