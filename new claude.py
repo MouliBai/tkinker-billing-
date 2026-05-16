@@ -1,26 +1,21 @@
-"""
-EvoAura Billing Application
-────────────────────────────
-A PyQt5-based billing system with TOTP 2FA, user management, and company settings.
-"""
-
 import sys
 import os
 import glob
 import sqlite3
 import random
 import string
-
 import pyotp
 import qrcode
 
 os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
 
+from product_page import ProductPage
+
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QPushButton, QLabel,
     QLineEdit, QGridLayout, QMessageBox, QInputDialog,
     QVBoxLayout, QHBoxLayout, QFrame, QComboBox,
-    QCheckBox, QTextEdit, QFileDialog
+    QCheckBox, QTextEdit, QFileDialog,QStackedWidget
 )
 from PyQt5.QtGui import QPixmap, QFont, QIcon
 from PyQt5.QtCore import Qt
@@ -246,28 +241,24 @@ def clear_company_logo(db_name: str):
         conn.execute("UPDATE company_info SET logo=NULL WHERE id=1")
 
 
-def load_company_info(db_name: str) -> dict:
-    """
-    Load the company-info row from *db_name*.
-    Returns a dict with keys: logo (QPixmap), company_name, phone, address,
-    gst, footer.  Returns an empty dict if no row exists yet.
-    """
-    with sqlite3.connect(db_name) as conn:
-        row = conn.execute(
-            "SELECT logo,company_name,phone,address,gst,footer FROM company_info WHERE id=1"
-        ).fetchone()
-
-    if not row:
-        return {}
-
-    return {
-        "logo"        : pixmap_from_blob(row[0]),
-        "company_name": row[1] or "",
-        "phone"       : row[2] or "",
-        "address"     : row[3] or "",
-        "gst"         : row[4] or "",
-        "footer"      : row[5] or "",
-    }
+def load_company_info(db_name):
+    conn = sqlite3.connect(db_name)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT logo, company_name, phone, address, gst, footer FROM company_info WHERE id=1"
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        return {
+            "logo"         : row[0] or "",
+            "company_name" : row[1] or "",
+            "phone"        : row[2] or "",
+            "address"      : row[3] or "",
+            "gst"          : row[4] or "",
+            "footer"       : row[5] or ""
+        }
+    return {}
 
 
 # ─────────────────────────────────────────────────────────────
@@ -880,12 +871,17 @@ class CompanySettings(QWidget):
         self.gst.setText(data.get("gst", ""))
         self.footer.setPlainText(data.get("footer", ""))
 
-        logo = data.get("logo")
-        # BUG FIX: logo is already a QPixmap (returned by load_company_info).
-        # The original code called QPixmap(logo) on it which would fail silently.
-        if logo and not logo.isNull():
-            self.logo_label.setPixmap(px_scaled(logo, 90, 90))
-            self.logo_label.setText("")
+        logo = data.get("logo", "")
+        if isinstance(logo, (bytes, bytearray)):
+            logo = logo.decode("utf-8", errors="ignore").strip()
+        if logo and os.path.exists(logo):
+            px = QPixmap(logo)
+            if not px.isNull():
+                self.logo_path = logo
+                self.logo_label.setPixmap(px.scaled(90, 90, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                self.logo_label.setText("")
+            else:
+                self.logo_label.setText("No Logo")
         else:
             self.logo_label.setText("No Logo")
 
@@ -895,11 +891,6 @@ class CompanySettings(QWidget):
 # ─────────────────────────────────────────────────────────────
 
 class Dashboard(QWidget):
-    """
-    Main application dashboard shown after a successful login.
-    Top bar: app branding, user OTP-security viewer, settings, logout.
-    Card: company welcome banner + module navigation buttons.
-    """
 
     def __init__(self, db_name: str, username: str = "User"):
         super().__init__()
@@ -908,7 +899,7 @@ class Dashboard(QWidget):
 
         company      = load_company_info(db_name)
         company_name = company.get("company_name", "Your Company")
-        logo_pixmap  = company.get("logo")
+        logo_path = company.get("logo") or ""
 
         self.setWindowTitle("Evo Aura Billing")
         self.showMaximized()
@@ -918,15 +909,19 @@ class Dashboard(QWidget):
         main_layout.setContentsMargins(20, 15, 20, 15)
         main_layout.setSpacing(15)
 
-        main_layout.addWidget(self._build_topbar())
-        main_layout.addWidget(self._build_card(company_name, logo_pixmap))
+        self.topbar = self._build_topbar()
+        main_layout.addWidget(self.topbar)
+
+        # ── STACK: page 0 = dashboard card, page 1+ = modules ──
+        self.stack = QStackedWidget()
+        self.stack.addWidget(self._build_card(company_name, logo_path))
+        main_layout.addWidget(self.stack)
 
         self.setLayout(main_layout)
 
     # ── TOP BAR ──────────────────────────────────────────────
 
     def _build_topbar(self) -> QFrame:
-        """Construct the white top navigation bar with branding and action buttons."""
         top_frame = QFrame()
         top_frame.setFixedHeight(70)
         top_frame.setStyleSheet("background: white; border-radius: 10px;")
@@ -934,12 +929,13 @@ class Dashboard(QWidget):
         top_layout = QHBoxLayout(top_frame)
         top_layout.setContentsMargins(20, 5, 20, 5)
 
-        # App logo icon (optional file)
         logo = QLabel()
         logo.setFixedSize(40, 40)
         pixmap = QPixmap("icon/auralogo.png")
         if not pixmap.isNull():
-            logo.setPixmap(px_scaled(pixmap, 40, 40))
+            logo.setPixmap(
+                pixmap.scaled(40, 40, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            )
 
         app_name = QLabel("Evo Aura")
         app_name.setFont(QFont("Segoe UI", 14, QFont.Bold))
@@ -949,8 +945,7 @@ class Dashboard(QWidget):
         dash_title.setFont(QFont("Segoe UI", 16, QFont.Bold))
         dash_title.setAlignment(Qt.AlignCenter)
 
-        # Clicking username opens OTP-verified QR/security viewer
-        user_btn = QPushButton(f"👨🏻‍💼  {self.username}")
+        user_btn = QPushButton(f"👤  {self.username}")
         user_btn.setCursor(Qt.PointingHandCursor)
         user_btn.setStyleSheet("""
             QPushButton {
@@ -1011,8 +1006,7 @@ class Dashboard(QWidget):
 
     # ── MAIN CARD ────────────────────────────────────────────
 
-    def _build_card(self, company_name: str, logo_pixmap) -> QFrame:
-        """Build the white content card: welcome banner + module navigation grid."""
+    def _build_card(self, company_name: str, logo_path: str) -> QFrame:
         card = QFrame()
         card.setStyleSheet("background: white; border-radius: 14px;")
 
@@ -1020,50 +1014,76 @@ class Dashboard(QWidget):
         card_layout.setContentsMargins(50, 30, 50, 30)
         card_layout.setSpacing(20)
 
-        # Welcome banner — logo beside company name when logo is available
-        if logo_pixmap and not logo_pixmap.isNull():
-            container = QWidget()
-            layout = QHBoxLayout(container)
-            layout.setContentsMargins(0, 0, 0, 0)
-            layout.setSpacing(10)
+        # Welcome banner
+        welcome_frame = QFrame()
+        welcome_frame.setFixedHeight(120)
+        welcome_frame.setStyleSheet("background-color: #eef5ff; border-radius: 10px;")
 
+        welcome_layout = QHBoxLayout(welcome_frame)
+        welcome_layout.setContentsMargins(20, 10, 20, 10)
+        welcome_layout.setSpacing(16)
+
+        if logo_path and os.path.exists(logo_path):
             img_label = QLabel()
-            img_label.setFixedSize(200, 200)
-            img_label.setPixmap(px_scaled(logo_pixmap, 200, 200))
+            img_label.setFixedSize(90, 90)
+            img_label.setPixmap(
+                QPixmap(logo_path).scaled(90, 90, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            )
+            img_label.setStyleSheet("background: transparent;")
+            welcome_layout.addWidget(img_label)
 
-            welcome = QLabel(f"Welcome, {company_name}")
-            welcome.setFont(QFont("Segoe UI", 26, QFont.Bold))
+        welcome = QLabel(f"Welcome, {company_name}")
+        welcome.setFont(QFont("Segoe UI", 26, QFont.Bold))
+        welcome.setStyleSheet("background: transparent; color: #1a7fe8;")
+        welcome_layout.addWidget(welcome)
+        welcome_layout.addStretch()
 
-            layout.addStretch()
-            layout.addWidget(img_label)
-            layout.addWidget(welcome)
-            layout.addStretch()
+        card_layout.addWidget(welcome_frame)
 
-            container.setStyleSheet("background-color: #eef5ff;")
-            card_layout.addWidget(container)
-        else:
-            welcome = QLabel(f"Welcome, {company_name}")
-            welcome.setAlignment(Qt.AlignCenter)
-            welcome.setFont(QFont("Segoe UI", 26, QFont.Bold))
-            welcome.setStyleSheet("background-color: #eef5ff;")
-            card_layout.addWidget(welcome)
-
-        # Module navigation grid
+        # Module grid
         grid = QGridLayout()
         grid.setSpacing(20)
 
-        grid.addWidget(self._make_card_btn("✚   Add Product",    "Add Product"), 0, 0)
-        grid.addWidget(self._make_card_btn("🏷️   Sale",           "Sale"),        0, 1)
-        grid.addWidget(self._make_card_btn("🔁   Return",         "Return"),      1, 0)
-        grid.addWidget(self._make_card_btn("🧾   Bill Views",     "Bill View"),   1, 1)
-        grid.addWidget(self._make_card_btn("📊   Report Insights","Report"),      2, 0, 1, 2)
+        btn_product = self._make_card_btn("✚   Add Product", "Add Product")
+        btn_product.clicked.disconnect()
+        btn_product.clicked.connect(self.open_products)
+
+        grid.addWidget(btn_product, 0, 0)
+        grid.addWidget(self._make_card_btn("🏷️   Sale",          "Sale"),   0, 1)
+        grid.addWidget(self._make_card_btn("🔁   Return",         "Return"), 1, 0)
+        grid.addWidget(self._make_card_btn("🧾   Bill Views",     "Bill View"), 1, 1)
+        grid.addWidget(self._make_card_btn("📊   Report Insights","Report"), 2, 0, 1, 2)
 
         card_layout.addLayout(grid)
         card.setLayout(card_layout)
         return card
 
+    # ── MODULE NAVIGATION ────────────────────────────────────
+
+    def open_products(self):
+        from product_page import ProductPage
+        company      = load_company_info(self.db_name)
+        company_name = company.get("company_name", "")
+        self.product_page = ProductPage(
+            self.db_name,
+            company_name=company_name,
+            on_back=self.close_products
+        )
+        self.stack.addWidget(self.product_page)
+        self.stack.setCurrentWidget(self.product_page)
+        self.topbar.setVisible(False)      # ← hide dashboard topbar
+
+    def close_products(self):
+        self.topbar.setVisible(True)       # ← show dashboard topbar again
+        self.stack.setCurrentIndex(0)
+        if self.stack.count() > 1:
+            widget = self.stack.widget(1)
+            self.stack.removeWidget(widget)
+            widget.deleteLater()
+
+    # ── HELPERS ──────────────────────────────────────────────
+
     def _make_card_btn(self, text: str, action: str) -> QPushButton:
-        """Return a single styled module-navigation card button."""
         btn = QPushButton(text)
         btn.setMinimumHeight(110)
         btn.setStyleSheet("""
@@ -1083,13 +1103,7 @@ class Dashboard(QWidget):
         btn.clicked.connect(lambda: self._coming_soon(action))
         return btn
 
-    # ── ACTIONS ──────────────────────────────────────────────
-
     def _open_user_security(self, username: str):
-        """
-        Show the user's own QR / recovery codes after OTP verification.
-        Protects access so only the account holder can view their credentials.
-        """
         otp, ok = QInputDialog.getText(
             self, "Verify Identity", "Enter your 6-digit OTP:", QLineEdit.Normal
         )
@@ -1097,30 +1111,38 @@ class Dashboard(QWidget):
             return
 
         if len(otp) != 6 or not otp.isdigit():
-            alert(self, "Error", "Enter valid 6-digit code", "warn")
+            QMessageBox.warning(self, "Error", "Enter valid 6-digit code")
             return
 
-        secret, codes = get_user_otp_data(self.db_name, username)
-        if not secret:
-            alert(self, "Error", "User not found", "warn")
+        conn   = sqlite3.connect(self.db_name)
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT otp_secret, recovery_codes FROM users WHERE username=?", (username,)
+        )
+        data = cursor.fetchone()
+        conn.close()
+
+        if not data:
+            QMessageBox.warning(self, "Error", "User not found")
             return
+
+        secret, recovery_codes = data
+        recovery_codes = recovery_codes.split(",") if recovery_codes else []
 
         if not verify_otp(secret, otp):
-            alert(self, "Error", "Invalid OTP ❌", "warn")
+            QMessageBox.warning(self, "Error", "Invalid OTP ❌")
             return
 
-        qr_path = generate_qr(secret, username)
-        self.qr_view = QRDisplay(secret, qr_path, codes)
+        qr_path      = generate_qr(secret, username)
+        self.qr_view = QRDisplay(secret, qr_path, recovery_codes)
         self.qr_view.show()
 
     def _open_settings(self):
-        """Open the CompanySettings editor window."""
         self.settings_win = CompanySettings(self.db_name)
         self.settings_win.show()
 
     def _coming_soon(self, page: str):
-        """Placeholder shown for modules that are not yet implemented."""
-        alert(self, page, f"{page} — Coming Soon 🚀")
+        QMessageBox.information(self, page, f"{page} — Coming Soon 🚀")
 
 
 # ─────────────────────────────────────────────────────────────
