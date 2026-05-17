@@ -1044,12 +1044,16 @@ class Dashboard(QWidget):
         grid = QGridLayout()
         grid.setSpacing(20)
 
-        btn_product = self._make_card_btn("✚   Add Product", "Add Product")
+        btn_product = self._make_card_btn("✚  Add Product", "Add Product")
         btn_product.clicked.disconnect()
         btn_product.clicked.connect(self.open_products)
-
         grid.addWidget(btn_product, 0, 0)
-        grid.addWidget(self._make_card_btn("🏷️   Sale",          "Sale"),   0, 1)
+
+        btn_sale = self._make_card_btn("🏷️ Sale", "Sale")
+        btn_sale.clicked.disconnect()
+        btn_sale.clicked.connect(self.open_billing)
+        grid.addWidget(btn_sale, 0, 1)
+
         grid.addWidget(self._make_card_btn("🔁   Return",         "Return"), 1, 0)
         grid.addWidget(self._make_card_btn("🧾   Bill Views",     "Bill View"), 1, 1)
         grid.addWidget(self._make_card_btn("📊   Report Insights","Report"), 2, 0, 1, 2)
@@ -1080,6 +1084,27 @@ class Dashboard(QWidget):
             widget = self.stack.widget(1)
             self.stack.removeWidget(widget)
             widget.deleteLater()
+
+
+    def open_billing(self):
+        from billing_page import BillingPage
+        company = load_company_info(self.db_name)
+        self.billing_page = BillingPage(
+            self.db_name,
+            company_name=company.get("company_name", ""),
+            on_back=self.close_billing
+        )
+        self.stack.addWidget(self.billing_page)
+        self.stack.setCurrentWidget(self.billing_page)
+        self.topbar.setVisible(False)
+
+    def close_billing(self):
+        self.topbar.setVisible(True)
+        self.stack.setCurrentIndex(0)
+        if self.stack.count() > 1:
+            w = self.stack.widget(1)
+            self.stack.removeWidget(w)
+            w.deleteLater()
 
     # ── HELPERS ──────────────────────────────────────────────
 

@@ -6,7 +6,7 @@ from PyQt5.QtWidgets import (
     QPushButton, QLineEdit, QTableWidget, QTableWidgetItem,
     QHeaderView, QFrame, QMessageBox, QDialog,
     QGridLayout, QComboBox, QCompleter, QAbstractItemView,
-    QListWidget, QListWidgetItem
+    QListWidget, QListWidgetItem, QCheckBox
 )
 from PyQt5.QtGui import QFont, QColor, QBrush, QIcon
 from PyQt5.QtCore import Qt, QSortFilterProxyModel, QStringListModel, QTimer
@@ -130,7 +130,7 @@ class ProductDialog(QDialog):
 
         title = "Edit Product" if product else "Add Product"
         self.setWindowTitle(title)
-        self.setFixedSize(460, 420)
+        self.setFixedSize(460, 460)
 
         layout = QVBoxLayout()
         layout.setContentsMargins(30, 25, 30, 25)
@@ -148,16 +148,20 @@ class ProductDialog(QDialog):
 
         self.item_code = QLineEdit()
         self.item_code.setMinimumHeight(32)
-        self.item_code.setPlaceholderText("Auto-generated")
+        self.item_code.setPlaceholderText("Enter or scan product barcode")
+
+        self.auto_code_chk = QCheckBox("Auto generate code")
+        self.auto_code_chk.stateChanged.connect(self._toggle_code)
+
         if product:
             self.item_code.setText(product[0])
-            self.item_code.setReadOnly(True)
-            self.item_code.setStyleSheet("background: #f5f5f5; color: #888;")
+            self.item_code.setReadOnly(False)
+            self.item_code.setStyleSheet("")
+            self.auto_code_chk.setVisible(False)
         else:
-            code = get_next_item_code(db_name)
-            self.item_code.setText(code)
-            self.item_code.setReadOnly(True)
-            self.item_code.setStyleSheet("background: #f5f5f5; color: #888;")
+            self.item_code.setText("")
+            self.item_code.setReadOnly(False)
+            self.item_code.setStyleSheet("")
 
         self.name = QLineEdit()
         self.name.setMinimumHeight(32)
@@ -201,20 +205,21 @@ class ProductDialog(QDialog):
 
         grid.addWidget(QLabel("Item Code"),  0, 0)
         grid.addWidget(self.item_code,        0, 1)
-        grid.addWidget(QLabel("Name *"),     1, 0)
-        grid.addWidget(self.name,             1, 1)
-        grid.addWidget(QLabel("Category"),   2, 0)
-        grid.addWidget(self.category,         2, 1)
-        grid.addWidget(QLabel("Unit"),       3, 0)
-        grid.addWidget(self.unit,             3, 1)
-        grid.addWidget(QLabel("Meter"),      4, 0)
-        grid.addWidget(self.meter,            4, 1)
-        grid.addWidget(QLabel("Price (₹)"),  5, 0)
-        grid.addWidget(self.price,            5, 1)
-        grid.addWidget(QLabel("Stock"),      6, 0)
-        grid.addWidget(self.stock,            6, 1)
-        grid.addWidget(QLabel("Status"),     7, 0)
-        grid.addWidget(self.status,           7, 1)
+        grid.addWidget(self.auto_code_chk,   1, 1)
+        grid.addWidget(QLabel("Name *"),     2, 0)
+        grid.addWidget(self.name,             2, 1)
+        grid.addWidget(QLabel("Category"),   3, 0)
+        grid.addWidget(self.category,         3, 1)
+        grid.addWidget(QLabel("Unit"),       4, 0)
+        grid.addWidget(self.unit,             4, 1)
+        grid.addWidget(QLabel("Meter"),      5, 0)
+        grid.addWidget(self.meter,            5, 1)
+        grid.addWidget(QLabel("Price (₹)"),  6, 0)
+        grid.addWidget(self.price,            6, 1)
+        grid.addWidget(QLabel("Stock"),      7, 0)
+        grid.addWidget(self.stock,            7, 1)
+        grid.addWidget(QLabel("Status"),     8, 0)
+        grid.addWidget(self.status,           8, 1)
 
         layout.addLayout(grid)
 
@@ -248,7 +253,18 @@ class ProductDialog(QDialog):
         layout.addLayout(btn_row)
 
         self.setLayout(layout)
-
+    def _toggle_code(self, state):
+        if state:
+            code = get_next_item_code(self.db_name)
+            self.item_code.setText(code)
+            self.item_code.setReadOnly(True)
+            self.item_code.setStyleSheet("background: #f5f5f5; color: #888;")
+        else:
+            self.item_code.setText("")
+            self.item_code.setReadOnly(False)
+            self.item_code.setStyleSheet("")
+            self.item_code.setPlaceholderText("Enter or scan product barcode")
+            self.item_code.setFocus()
     def save(self):
         name     = self.name.text().strip()
         price    = self.price.text().strip() or "0"
@@ -256,6 +272,9 @@ class ProductDialog(QDialog):
 
         if not name:
             QMessageBox.warning(self, "Error", "Product name is required.")
+            return
+        if not self.item_code.text().strip():
+            QMessageBox.warning(self, "Error", "Item code is required.")
             return
 
         try:
