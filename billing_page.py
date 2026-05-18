@@ -1,5 +1,6 @@
+import sys
 import sqlite3
-import os
+
 from datetime import datetime
 
 from PyQt5.QtWidgets import (
@@ -7,7 +8,7 @@ from PyQt5.QtWidgets import (
     QPushButton, QLineEdit, QTableWidget, QTableWidgetItem,
     QHeaderView, QFrame, QMessageBox, QAbstractItemView,
     QGridLayout, QComboBox, QShortcut, QSizePolicy,
-    QDialog, QSpinBox, QDoubleSpinBox
+    QDialog, QSpinBox, QDoubleSpinBox, QApplication
 )
 from PyQt5.QtGui import QFont, QColor, QBrush, QKeySequence
 from PyQt5.QtCore import Qt, QTimer
@@ -18,6 +19,7 @@ from PyQt5.QtGui import QPainter, QTextDocument
 # ──────────────────────────────────────────
 #  DB FUNCTIONS
 # ──────────────────────────────────────────
+
 def init_billing_tables(db_name):
     conn = sqlite3.connect(db_name)
     c = conn.cursor()
@@ -91,7 +93,7 @@ def get_product_by_code(db_name, code):
     conn = sqlite3.connect(db_name)
     c = conn.cursor()
     c.execute("""
-        SELECT item_code, name, price, stock FROM products
+        SELECT item_code, name, selling_price, stock FROM products
         WHERE item_code=? AND status='Active'
     """, (code,))
     row = c.fetchone()
@@ -103,7 +105,7 @@ def search_product_suggestions(db_name, query):
     conn = sqlite3.connect(db_name)
     c = conn.cursor()
     c.execute("""
-        SELECT item_code, name, price FROM products
+        SELECT item_code, name, selling_price FROM products
         WHERE (item_code LIKE ? OR name LIKE ?) AND status='Active'
         LIMIT 8
     """, (f"%{query}%", f"%{query}%"))
@@ -115,14 +117,20 @@ def search_product_suggestions(db_name, query):
 def load_company_info_billing(db_name):
     conn = sqlite3.connect(db_name)
     c = conn.cursor()
-    c.execute("SELECT logo, company_name, phone, address, gst, footer FROM company_info WHERE id=1")
+    c.execute(
+        "SELECT logo, company_name, phone, address, gst, footer "
+        "FROM company_info WHERE id=1"
+    )
     row = c.fetchone()
     conn.close()
     if row:
         return {
-            "logo": row[0] or "", "company_name": row[1] or "",
-            "phone": row[2] or "", "address": row[3] or "",
-            "gst": row[4] or "", "footer": row[5] or ""
+            "logo":         row[0] or "",
+            "company_name": row[1] or "",
+            "phone":        row[2] or "",
+            "address":      row[3] or "",
+            "gst":          row[4] or "",
+            "footer":       row[5] or "",
         }
     return {}
 
@@ -130,7 +138,9 @@ def load_company_info_billing(db_name):
 # ──────────────────────────────────────────
 #  CASH RETURN POPUP
 # ──────────────────────────────────────────
+
 class CashReturnDialog(QDialog):
+
     def __init__(self, grand_total, parent=None):
         super().__init__(parent)
         self.grand_total = grand_total
@@ -141,7 +151,9 @@ class CashReturnDialog(QDialog):
         layout.setContentsMargins(30, 25, 30, 25)
         layout.setSpacing(14)
 
-        layout.addWidget(self._lbl(f"Grand Total:  ₹ {grand_total:,.2f}", 15, bold=True))
+        layout.addWidget(
+            self._lbl(f"Grand Total:  ₹ {grand_total:,.2f}", 15, bold=True)
+        )
 
         row = QHBoxLayout()
         row.addWidget(self._lbl("Cash Received: ₹", 13))
@@ -164,14 +176,16 @@ class CashReturnDialog(QDialog):
         ok_btn = QPushButton("✅  Confirm & Save")
         ok_btn.setMinimumHeight(36)
         ok_btn.setStyleSheet(
-            "background:#1a7fe8;color:white;border-radius:6px;font-weight:bold;border:none;"
+            "background:#1a7fe8;color:white;border-radius:6px;"
+            "font-weight:bold;border:none;"
         )
         ok_btn.clicked.connect(self.accept)
 
         cancel_btn = QPushButton("Cancel")
         cancel_btn.setMinimumHeight(36)
         cancel_btn.setStyleSheet(
-            "background:#eee;color:#333;border-radius:6px;font-weight:bold;border:none;"
+            "background:#eee;color:#333;border-radius:6px;"
+            "font-weight:bold;border:none;"
         )
         cancel_btn.clicked.connect(self.reject)
 
@@ -183,10 +197,10 @@ class CashReturnDialog(QDialog):
         self.cash_input.setFocus()
 
     def _lbl(self, text, size=13, bold=False):
-        l = QLabel(text)
+        lbl = QLabel(text)
         weight = QFont.Bold if bold else QFont.Normal
-        l.setFont(QFont("Segoe UI", size, weight))
-        return l
+        lbl.setFont(QFont("Segoe UI", size, weight))
+        return lbl
 
     def _calc(self):
         try:
@@ -205,6 +219,7 @@ class CashReturnDialog(QDialog):
 # ──────────────────────────────────────────
 #  BILLING PAGE
 # ──────────────────────────────────────────
+
 class BillingPage(QWidget):
 
     def __init__(self, db_name, company_name="", on_back=None):
@@ -212,10 +227,18 @@ class BillingPage(QWidget):
         self.db_name      = db_name
         self.company_name = company_name
         self.on_back      = on_back
-        self.items        = []   # list of dicts, never touches DB until save
+        self.items        = []
+        self._scan_timer  = None   # FIX: initialise so teardown is safe
+
+        # running totals — initialised so _recalc() is always safe
+        self._subtotal = 0.0
+        self._disc_amt = 0.0
+        self._disc_pct = 0.0
+        self._sgst     = 0.0
+        self._cgst     = 0.0
+        self._grand    = 0.0
 
         init_billing_tables(db_name)
-
         self.invoice_id = generate_invoice_id(db_name)
 
         layout = QVBoxLayout()
@@ -229,20 +252,19 @@ class BillingPage(QWidget):
         self.setLayout(layout)
         self.setStyleSheet("background:#f4f7fb;")
 
-        # F11 shortcut → Save & Print
         shortcut = QShortcut(QKeySequence("F11"), self)
         shortcut.activated.connect(self._checkout)
 
-        # Add first empty row
         self._add_row()
 
-    # ──────────────────────────────────────
-    #  TOP BAR
-    # ──────────────────────────────────────
+    # ── TOP BAR ──────────────────────────────────────────────
+
     def _build_topbar(self):
         bar = QFrame()
         bar.setFixedHeight(60)
-        bar.setStyleSheet("background:white; border-bottom:1px solid #e0e0e0;")
+        bar.setStyleSheet(
+            "background:white; border-bottom:1px solid #e0e0e0;"
+        )
 
         lay = QHBoxLayout(bar)
         lay.setContentsMargins(16, 0, 16, 0)
@@ -280,9 +302,8 @@ class BillingPage(QWidget):
 
         return bar
 
-    # ──────────────────────────────────────
-    #  BODY — search bar + table
-    # ──────────────────────────────────────
+    # ── BODY ─────────────────────────────────────────────────
+
     def _build_body(self):
         body = QWidget()
         body.setStyleSheet("background:#f4f7fb;")
@@ -290,14 +311,13 @@ class BillingPage(QWidget):
         lay.setContentsMargins(24, 16, 24, 8)
         lay.setSpacing(10)
 
-        # Date + Invoice row
         info_row = QHBoxLayout()
         date_str = datetime.now().strftime("%d-%m-%Y  %H:%M")
         info_row.addWidget(QLabel(f"📅  {date_str}"))
         info_row.addStretch()
         lay.addLayout(info_row)
 
-        # Search / barcode input
+        # Search / barcode
         search_frame = QFrame()
         search_frame.setFixedHeight(44)
         search_frame.setStyleSheet(
@@ -307,7 +327,9 @@ class BillingPage(QWidget):
         sf_lay.setContentsMargins(12, 0, 12, 0)
 
         lbl = QLabel("🔍")
-        lbl.setStyleSheet("background:transparent;border:none;font-size:16px;")
+        lbl.setStyleSheet(
+            "background:transparent;border:none;font-size:16px;"
+        )
 
         self.scan_input = QLineEdit()
         self.scan_input.setPlaceholderText(
@@ -346,11 +368,12 @@ class BillingPage(QWidget):
             self.suggest_btns.append(b)
         lay.addWidget(self.suggest_frame)
 
-        # TABLE
+        # Table
         self.table = QTableWidget()
         self.table.setColumnCount(7)
         self.table.setHorizontalHeaderLabels([
-            "S.No", "Item Code", "Product Name", "Price (₹)", "Qty", "Total (₹)", ""
+            "S.No", "Item Code", "Product Name",
+            "Price (₹)", "Qty", "Total (₹)", ""
         ])
         hdr = self.table.horizontalHeader()
         hdr.setSectionResizeMode(0, QHeaderView.Fixed)
@@ -373,7 +396,8 @@ class BillingPage(QWidget):
         self.table.setStyleSheet("""
             QTableWidget {
                 background:white;border:1px solid #e0e0e0;
-                border-radius:8px;font-size:13px;gridline-color:#f0f0f0;
+                border-radius:8px;font-size:13px;
+                gridline-color:#f0f0f0;
             }
             QHeaderView::section {
                 background:#f8fafc;font-weight:bold;padding:8px;
@@ -387,21 +411,19 @@ class BillingPage(QWidget):
 
         return body
 
-    # ──────────────────────────────────────
-    #  BOTTOM TOTALS FRAME
-    # ──────────────────────────────────────
+    # ── BOTTOM TOTALS ─────────────────────────────────────────
+
     def _build_bottom(self):
         bot = QFrame()
         bot.setFixedHeight(160)
         bot.setStyleSheet(
-            "background:white;border-top:2px solid #e0e8f0;border-radius:0px;"
+            "background:white;border-top:2px solid #e0e8f0;"
         )
 
         lay = QHBoxLayout(bot)
         lay.setContentsMargins(30, 14, 30, 14)
         lay.setSpacing(30)
 
-        # LEFT — discount fields
         left = QGridLayout()
         left.setSpacing(8)
         left.setColumnMinimumWidth(0, 130)
@@ -417,21 +439,20 @@ class BillingPage(QWidget):
         self.disc_pct.setPlaceholderText("0 %")
         self.disc_pct.textChanged.connect(self._on_disc_pct_changed)
 
-        left.addWidget(QLabel("Discount (₹):"),   0, 0)
-        left.addWidget(self.disc_amt,               0, 1)
-        left.addWidget(QLabel("Discount (%):"),   1, 0)
-        left.addWidget(self.disc_pct,               1, 1)
-        left.addWidget(QLabel("SGST (2.5%):"),    2, 0)
+        left.addWidget(QLabel("Discount (₹):"),  0, 0)
+        left.addWidget(self.disc_amt,              0, 1)
+        left.addWidget(QLabel("Discount (%):"),  1, 0)
+        left.addWidget(self.disc_pct,              1, 1)
+        left.addWidget(QLabel("SGST (2.5%):"),   2, 0)
         self.sgst_lbl = QLabel("₹ 0.00")
-        left.addWidget(self.sgst_lbl,               2, 1)
-        left.addWidget(QLabel("CGST (2.5%):"),    3, 0)
+        left.addWidget(self.sgst_lbl,              2, 1)
+        left.addWidget(QLabel("CGST (2.5%):"),   3, 0)
         self.cgst_lbl = QLabel("₹ 0.00")
-        left.addWidget(self.cgst_lbl,               3, 1)
+        left.addWidget(self.cgst_lbl,              3, 1)
 
         lay.addLayout(left)
         lay.addStretch()
 
-        # RIGHT — totals
         right = QVBoxLayout()
         right.setSpacing(6)
 
@@ -439,11 +460,12 @@ class BillingPage(QWidget):
         sub_row.addWidget(QLabel("Sub Total:"))
         sub_row.addStretch()
         self.subtotal_lbl = QLabel("₹ 0.00")
-        self.subtotal_lbl.setStyleSheet("font-size:14px; font-weight:bold;")
+        self.subtotal_lbl.setStyleSheet(
+            "font-size:14px; font-weight:bold;"
+        )
         sub_row.addWidget(self.subtotal_lbl)
         right.addLayout(sub_row)
 
-        # Grand total — large
         grand_row = QHBoxLayout()
         grand_lbl = QLabel("Grand Total:")
         grand_lbl.setFont(QFont("Segoe UI", 18, QFont.Bold))
@@ -458,51 +480,44 @@ class BillingPage(QWidget):
         lay.addLayout(right)
         return bot
 
-    # ──────────────────────────────────────
-    #  TABLE ROW MANAGEMENT
-    # ──────────────────────────────────────
+    # ── TABLE ROW MANAGEMENT ─────────────────────────────────
+
     def _add_row(self, code="", name="", price=0.0, qty=1):
         self.table.blockSignals(True)
         row = self.table.rowCount()
         self.table.insertRow(row)
         self.table.setRowHeight(row, 40)
 
-        # S.No (read-only)
         sno = QTableWidgetItem(str(row + 1))
         sno.setFlags(Qt.ItemIsEnabled)
         sno.setTextAlignment(Qt.AlignCenter)
         self.table.setItem(row, 0, sno)
 
-        # Item code
         code_item = QTableWidgetItem(code)
         code_item.setTextAlignment(Qt.AlignCenter)
         self.table.setItem(row, 1, code_item)
 
-        # Name
         self.table.setItem(row, 2, QTableWidgetItem(name))
 
-        # Price
         price_item = QTableWidgetItem(f"{price:.2f}" if price else "")
         price_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self.table.setItem(row, 3, price_item)
 
-        # Qty
         qty_item = QTableWidgetItem(str(qty) if code else "")
         qty_item.setTextAlignment(Qt.AlignCenter)
         self.table.setItem(row, 4, qty_item)
 
-        # Total (read-only)
         total = price * qty if price else 0
         total_item = QTableWidgetItem(f"{total:.2f}" if total else "")
         total_item.setFlags(Qt.ItemIsEnabled)
         total_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self.table.setItem(row, 5, total_item)
 
-        # Delete btn
         del_btn = QPushButton("🗑")
         del_btn.setFixedSize(30, 28)
         del_btn.setStyleSheet(
-            "background:#fff0f0;color:#e53935;border-radius:5px;border:none;"
+            "background:#fff0f0;color:#e53935;"
+            "border-radius:5px;border:none;"
         )
         del_btn.clicked.connect(lambda _, r=row: self._delete_row(r))
         self.table.setCellWidget(row, 6, del_btn)
@@ -514,7 +529,6 @@ class BillingPage(QWidget):
 
     def _delete_row(self, row):
         if self.table.rowCount() <= 1:
-            # clear instead of delete last row
             self.table.blockSignals(True)
             for col in range(1, 6):
                 item = self.table.item(row, col)
@@ -532,32 +546,32 @@ class BillingPage(QWidget):
             item = self.table.item(r, 0)
             if item:
                 item.setText(str(r + 1))
-            # rewire delete buttons
             del_btn = self.table.cellWidget(r, 6)
             if del_btn:
                 try:
                     del_btn.clicked.disconnect()
                 except Exception:
                     pass
-                del_btn.clicked.connect(lambda _, row=r: self._delete_row(row))
+                del_btn.clicked.connect(
+                    lambda _, row=r: self._delete_row(row)
+                )
 
-    # ──────────────────────────────────────
-    #  SCAN / SEARCH
-    # ──────────────────────────────────────
+    # ── SCAN / SEARCH ─────────────────────────────────────────
+
     def _on_scan(self):
         text = self.scan_input.text().strip()
         if not text:
             return
         self._hide_suggestions()
 
-        # Exact code match — barcode scanner
         product = get_product_by_code(self.db_name, text)
         if product:
-            self._add_product_to_table(product[0], product[1], product[2])
+            self._add_product_to_table(
+                product[0], product[1], product[2]
+            )
             self.scan_input.clear()
             return
 
-        # Partial search — manual typing
         results = search_product_suggestions(self.db_name, text)
         if len(results) == 1:
             p = results[0]
@@ -566,42 +580,37 @@ class BillingPage(QWidget):
         elif results:
             self._show_suggestions(results)
         else:
-            QMessageBox.warning(self, "Not Found", f"No product found for '{text}'")
+            QMessageBox.warning(
+                self, "Not Found",
+                f"No product found for '{text}'"
+            )
             self.scan_input.clear()
-
 
     def _on_type(self, text):
         if not text.strip():
             self._hide_suggestions()
             return
-
-        # Use a small delay — barcode scanner types full code in <50ms
-        # so timer prevents suggestion popup during scan
-        if hasattr(self, '_scan_timer'):
+        if self._scan_timer is not None:
             self._scan_timer.stop()
-
         self._scan_timer = QTimer()
         self._scan_timer.setSingleShot(True)
-        self._scan_timer.timeout.connect(lambda: self._delayed_suggest(text))
-        self._scan_timer.start(80)   # 80ms delay
-
+        self._scan_timer.timeout.connect(
+            lambda: self._delayed_suggest(text)
+        )
+        self._scan_timer.start(80)
 
     def _delayed_suggest(self, text):
-        # If text changed again before timer fired, skip
         current = self.scan_input.text().strip()
         if current != text:
             return
-
-        # Try exact match silently first
         product = get_product_by_code(self.db_name, text)
         if product:
-            # Exact match found — auto enter without pressing Enter
-            self._add_product_to_table(product[0], product[1], product[2])
+            self._add_product_to_table(
+                product[0], product[1], product[2]
+            )
             self.scan_input.clear()
             self._hide_suggestions()
             return
-
-        # Show suggestions for manual typing
         results = search_product_suggestions(self.db_name, text)
         if results:
             self._show_suggestions(results)
@@ -619,7 +628,8 @@ class BillingPage(QWidget):
                 except Exception:
                     pass
                 btn.clicked.connect(
-                    lambda _, c=code, n=name, p=price: self._pick_suggestion(c, n, p)
+                    lambda _, c=code, n=name, p=price:
+                        self._pick_suggestion(c, n, p)
                 )
             else:
                 btn.setVisible(False)
@@ -636,7 +646,6 @@ class BillingPage(QWidget):
         self._hide_suggestions()
 
     def _add_product_to_table(self, code, name, price):
-        # Check if product already in table — increment qty
         for r in range(self.table.rowCount()):
             code_item = self.table.item(r, 1)
             if code_item and code_item.text() == code:
@@ -644,54 +653,53 @@ class BillingPage(QWidget):
                 qty = int(qty_item.text() or "1") + 1
                 self.table.blockSignals(True)
                 qty_item.setText(str(qty))
-                total = float(self.table.item(r, 3).text() or 0) * qty
-                self.table.item(r, 5).setText(f"{total:.2f}")
+                price_val = float(
+                    self.table.item(r, 3).text() or 0
+                )
+                self.table.item(r, 5).setText(
+                    f"{price_val * qty:.2f}"
+                )
                 self.table.blockSignals(False)
                 self._recalc()
                 return
 
-        # Fill last empty row or add new row
         last = self.table.rowCount() - 1
         code_item = self.table.item(last, 1)
         if code_item and code_item.text().strip() == "":
-            # fill empty row
             self.table.blockSignals(True)
             self.table.item(last, 1).setText(code)
             self.table.item(last, 2).setText(name)
-            price_item = self.table.item(last, 3)
-            price_item.setText(f"{price:.2f}")
-            qty_item = self.table.item(last, 4)
-            qty_item.setText("1")
-            total_item = self.table.item(last, 5)
-            total_item.setText(f"{price:.2f}")
+            self.table.item(last, 3).setText(f"{price:.2f}")
+            self.table.item(last, 4).setText("1")
+            self.table.item(last, 5).setText(f"{price:.2f}")
             self.table.blockSignals(False)
         else:
             self._add_row(code, name, price, 1)
 
-        # Always add a new empty row at bottom
         self._add_row()
         self._recalc()
 
-    # ──────────────────────────────────────
-    #  CELL EDIT — live recalc
-    # ──────────────────────────────────────
+    # ── CELL EDIT ────────────────────────────────────────────
+
     def _on_cell_changed(self, row, col):
-        if col not in (3, 4):   # only price or qty
+        if col not in (3, 4):
             return
         self.table.blockSignals(True)
         try:
-            price = float(self.table.item(row, 3).text() or 0)
-            qty   = int(self.table.item(row, 4).text() or 1)
-            total = price * qty
-            self.table.item(row, 5).setText(f"{total:.2f}")
+            price_item = self.table.item(row, 3)
+            qty_item   = self.table.item(row, 4)
+            total_item = self.table.item(row, 5)
+            if price_item and qty_item and total_item:
+                price = float(price_item.text() or 0)
+                qty   = int(qty_item.text() or 1)
+                total_item.setText(f"{price * qty:.2f}")
         except (ValueError, AttributeError):
             pass
         self.table.blockSignals(False)
         self._recalc()
 
-    # ──────────────────────────────────────
-    #  TOTALS CALCULATION
-    # ──────────────────────────────────────
+    # ── TOTALS ────────────────────────────────────────────────
+
     def _recalc(self):
         subtotal = 0.0
         for r in range(self.table.rowCount()):
@@ -702,7 +710,6 @@ class BillingPage(QWidget):
                 except ValueError:
                     pass
 
-        # Discount
         try:
             disc_amt = float(self.disc_amt.text() or 0)
         except ValueError:
@@ -712,11 +719,11 @@ class BillingPage(QWidget):
         except ValueError:
             disc_pct = 0.0
 
-        after_disc = subtotal - disc_amt - (subtotal * disc_pct / 100)
-        after_disc = max(after_disc, 0)
-
-        sgst = after_disc * 0.025
-        cgst = after_disc * 0.025
+        after_disc = max(
+            subtotal - disc_amt - (subtotal * disc_pct / 100), 0
+        )
+        sgst  = after_disc * 0.025
+        cgst  = after_disc * 0.025
         grand = after_disc + sgst + cgst
 
         self.subtotal_lbl.setText(f"₹ {subtotal:,.2f}")
@@ -724,12 +731,12 @@ class BillingPage(QWidget):
         self.cgst_lbl.setText(f"₹ {cgst:,.2f}")
         self.grand_lbl.setText(f"₹ {grand:,.2f}")
 
-        self._subtotal  = subtotal
-        self._disc_amt  = disc_amt
-        self._disc_pct  = disc_pct
-        self._sgst      = sgst
-        self._cgst      = cgst
-        self._grand     = grand
+        self._subtotal = subtotal
+        self._disc_amt = disc_amt
+        self._disc_pct = disc_pct
+        self._sgst     = sgst
+        self._cgst     = cgst
+        self._grand    = grand
 
     def _on_disc_amt_changed(self):
         self._recalc()
@@ -737,21 +744,28 @@ class BillingPage(QWidget):
     def _on_disc_pct_changed(self):
         self._recalc()
 
-    # ──────────────────────────────────────
-    #  COLLECT ITEMS
-    # ──────────────────────────────────────
+    # ── COLLECT ITEMS ────────────────────────────────────────
+
     def _collect_items(self):
         items = []
         for r in range(self.table.rowCount()):
-            code = (self.table.item(r, 1).text() or "").strip()
-            name = (self.table.item(r, 2).text() or "").strip()
-            if not name:
+            code_item = self.table.item(r, 1)
+            name_item = self.table.item(r, 2)
+            if not name_item or not name_item.text().strip():
                 continue
+            code = (code_item.text() or "").strip() if code_item else ""
+            name = name_item.text().strip()
             try:
-                price = float(self.table.item(r, 3).text() or 0)
-                qty   = int(self.table.item(r, 4).text() or 1)
-                total = float(self.table.item(r, 5).text() or 0)
-            except ValueError:
+                price = float(
+                    (self.table.item(r, 3).text() or "0")
+                )
+                qty   = int(
+                    (self.table.item(r, 4).text() or "1")
+                )
+                total = float(
+                    (self.table.item(r, 5).text() or "0")
+                )
+            except (ValueError, AttributeError):
                 continue
             items.append({
                 "code": code, "name": name,
@@ -759,9 +773,8 @@ class BillingPage(QWidget):
             })
         return items
 
-    # ──────────────────────────────────────
-    #  CHECKOUT — Save & Print
-    # ──────────────────────────────────────
+    # ── CHECKOUT ─────────────────────────────────────────────
+
     def _checkout(self):
         items = self._collect_items()
         if not items:
@@ -774,27 +787,19 @@ class BillingPage(QWidget):
         if dlg.exec_() != QDialog.Accepted:
             return
 
-        # Save to DB only now
         save_invoice(
-            self.db_name,
-            self.invoice_id,
-            items,
-            self._subtotal,
-            self._disc_amt,
-            self._disc_pct,
-            self._sgst,
-            self._cgst,
-            self._grand
+            self.db_name, self.invoice_id, items,
+            self._subtotal, self._disc_amt, self._disc_pct,
+            self._sgst, self._cgst, self._grand
         )
 
         self._print_invoice(items)
         self._new_bill()
 
-    # ──────────────────────────────────────
-    #  PRINT
-    # ──────────────────────────────────────
+    # ── PRINT ─────────────────────────────────────────────────
+
     def _print_invoice(self, items):
-        company = load_company_info_billing(self.db_name)
+        company  = load_company_info_billing(self.db_name)
         date_str = datetime.now().strftime("%d-%m-%Y %H:%M")
 
         rows_html = ""
@@ -810,27 +815,46 @@ class BillingPage(QWidget):
 
         html = f"""
         <html><body style='font-family:Arial;font-size:12px;'>
-        <h2 style='text-align:center;margin:0'>{company.get('company_name','')}</h2>
-        <p style='text-align:center;margin:2px'>{company.get('address','')}</p>
-        <p style='text-align:center;margin:2px'>Ph: {company.get('phone','')} | GST: {company.get('gst','')}</p>
+        <h2 style='text-align:center;margin:0'>
+            {company.get('company_name','')}
+        </h2>
+        <p style='text-align:center;margin:2px'>
+            {company.get('address','')}
+        </p>
+        <p style='text-align:center;margin:2px'>
+            Ph: {company.get('phone','')} | GST: {company.get('gst','')}
+        </p>
         <hr/>
-        <p><b>Invoice:</b> {self.invoice_id} &nbsp;&nbsp; <b>Date:</b> {date_str}</p>
+        <p><b>Invoice:</b> {self.invoice_id}
+           &nbsp;&nbsp; <b>Date:</b> {date_str}</p>
         <table width='100%' border='1' cellspacing='0' cellpadding='4'
                style='border-collapse:collapse;'>
             <tr style='background:#eef5ff;'>
-                <th>S.No</th><th>Product</th><th>Price</th><th>Qty</th><th>Total</th>
+                <th>S.No</th><th>Product</th>
+                <th>Price</th><th>Qty</th><th>Total</th>
             </tr>
             {rows_html}
         </table>
         <br/>
         <table width='100%'>
-            <tr><td>Sub Total</td><td align='right'>₹ {self._subtotal:,.2f}</td></tr>
-            <tr><td>Discount (₹)</td><td align='right'>- ₹ {self._disc_amt:,.2f}</td></tr>
-            <tr><td>Discount (%)</td><td align='right'>{self._disc_pct}%</td></tr>
-            <tr><td>SGST (2.5%)</td><td align='right'>₹ {self._sgst:,.2f}</td></tr>
-            <tr><td>CGST (2.5%)</td><td align='right'>₹ {self._cgst:,.2f}</td></tr>
-            <tr><td><b style='font-size:14px'>Grand Total</b></td>
-                <td align='right'><b style='font-size:14px'>₹ {self._grand:,.2f}</b></td></tr>
+            <tr><td>Sub Total</td>
+                <td align='right'>₹ {self._subtotal:,.2f}</td></tr>
+            <tr><td>Discount (₹)</td>
+                <td align='right'>- ₹ {self._disc_amt:,.2f}</td></tr>
+            <tr><td>Discount (%)</td>
+                <td align='right'>{self._disc_pct}%</td></tr>
+            <tr><td>SGST (2.5%)</td>
+                <td align='right'>₹ {self._sgst:,.2f}</td></tr>
+            <tr><td>CGST (2.5%)</td>
+                <td align='right'>₹ {self._cgst:,.2f}</td></tr>
+            <tr>
+                <td><b style='font-size:14px'>Grand Total</b></td>
+                <td align='right'>
+                    <b style='font-size:14px'>
+                        ₹ {self._grand:,.2f}
+                    </b>
+                </td>
+            </tr>
         </table>
         <hr/>
         <p style='text-align:center'>{company.get('footer','')}</p>
@@ -843,9 +867,8 @@ class BillingPage(QWidget):
             doc.setHtml(html)
             doc.print_(printer)
 
-    # ──────────────────────────────────────
-    #  NEW BILL
-    # ──────────────────────────────────────
+    # ── NEW BILL ─────────────────────────────────────────────
+
     def _new_bill(self):
         self.table.setRowCount(0)
         self.disc_amt.setText("0")
@@ -855,9 +878,8 @@ class BillingPage(QWidget):
         self._recalc()
         self._add_row()
 
-    # ──────────────────────────────────────
-    #  BACK
-    # ──────────────────────────────────────
+    # ── BACK ─────────────────────────────────────────────────
+
     def _go_back(self):
         if self.on_back:
             self.on_back()
